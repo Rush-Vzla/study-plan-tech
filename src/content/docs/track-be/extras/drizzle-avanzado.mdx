@@ -1,0 +1,285 @@
+---
+title: "Drizzle avanzado: CTEs, window functions y batch queries"
+description: WITH CTEs, window functions, batch queries y subqueries tipadas — las herramientas de Drizzle que necesitas cuando las queries simples no alcanzan.
+sidebar:
+  order: 2
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-be'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-be]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-be/drizzle-fundamentos
+  - track-be/kpi-snapshots
+learning_outcomes:
+  - "Escribir CTEs con WITH para queries complejas sin subqueries anidadas"
+  - "Usar window functions (ROW_NUMBER, LAG, RANK) para análisis de series temporales"
+  - "Ejecutar batch queries con db.batch() para múltiples operaciones en una sola ida"
+  - "Construir subqueries tipadas que Drizzle pueda validar en compilación"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  drizzle: '0.36'
+  postgres: '17'
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Rush usa Drizzle para todo el acceso a datos. El 80% del tiempo eso significa inserts, selects simples, y joins básicos. Pero acá hay patrones que van a aparecer cuando empieces a trabajar en los KPI snapshots, los reportes de tendencias, y las operaciones de bulk. Esta unidad te los enseña.
+
+## 1. Conceptos
+
+### 1. CTEs (Common Table Expressions) con WITH
+
+Imagínate que tienes que calcular el total de ventas por mes y después filtrar solo los meses donde el total supera cierto umbral. Sin CTEs, terminas con un subquery anidado ilegible. Con CTEs, puedes nombrar cada paso de la query.
+
+Drizzle expone `db.$with()` para construir CTEs:
+
+```ts
+// src/reports/sales-report.service.ts
+import { db } from '../drizzle/drizzle.provider';
+import { salesEvents } from '../drizzle/schema';
+import { sql, gt } from 'drizzle-orm';
+
+async function getMonthlySalesAboveThreshold(
+  businessId: string,
+  thresholdUsd: number,
+) {
+  const monthlySales = db.$with('monthly_sales').as(
+    db
+      .select({
+        month: sql<string>`DATE_TRUNC('month', ${salesEvents.createdAt})`.as('month'),
+        totalUsd: sql<number>`SUM(${salesEvents.usdEquivalent})`.as('total_usd'),
+      })
+      .from(salesEvents)
+      .where(sql`${salesEvents.businessId} = ${businessId}`)
+      .groupBy(sql`DATE_TRUNC('month', ${salesEvents.createdAt})`),
+  );
+
+  return db
+    .with(monthlySales)
+    .select()
+    .from(monthlySales)
+    .where(gt(monthlySales.totalUsd, thresholdUsd));
+}
+```
+
+Lo importante: la CTE `monthly_sales` está tipada. Si accedes a `.totalUsd` en el resultado final, TypeScript sabe que es `number`. Sin CTEs, ese tipo se pierde en subqueries anidados.
+
+### 2. Window functions para análisis de series temporales
+
+Las window functions son funciones SQL que calculan sobre un conjunto de filas relacionadas sin colapsarlas como hace `GROUP BY`. Son ideales para tendencias, rangos, y comparaciones entre períodos.
+
+`ROW_NUMBER`, `LAG`, `RANK` — estos son los que más vas a usar:
+
+```ts
+// Ventas actuales vs mes anterior por tenant
+async function getSalesWithPriorMonthComparison(businessId: string) {
+  return db.execute(sql`
+    SELECT
+      DATE_TRUNC('month', created_at) AS month,
+      SUM(usd_equivalent) AS current_month_total,
+      LAG(SUM(usd_equivalent)) OVER (
+        PARTITION BY business_id
+        ORDER BY DATE_TRUNC('month', created_at)
+      ) AS prior_month_total
+    FROM sales_events
+    WHERE business_id = ${businessId}
+    GROUP BY business_id, DATE_TRUNC('month', created_at)
+    ORDER BY month DESC
+    LIMIT 12
+  `);
+}
+```
+
+`LAG(valor) OVER (PARTITION BY ... ORDER BY ...)` devuelve el valor de la fila anterior en la partición — en este caso, el total del mes anterior. Sin window functions, tendrías que hacer dos queries y unirlas en código.
+
+Acá está el punto: las window functions corren en Postgres, no en tu servidor. Mueves menos datos por la red y el cálculo es más eficiente.
+
+### 3. Batch queries con db.batch()
+
+Drizzle tiene soporte para batch queries en algunos drivers (PlanetScale, Turso, libSQL). En PostgreSQL con `node-postgres`, el equivalente es usar transacciones o `db.transaction()`.
+
+Para operaciones donde necesitas ejecutar varias queries de forma atómica:
+
+```ts
+// src/snapshots/snapshot.service.ts
+async function createDailySnapshot(
+  businessId: string,
+  date: Date,
+  kpis: KpiData,
+) {
+  return db.transaction(async (tx) => {
+    await tx
+      .insert(kpiSnapshots)
+      .values({
+        businessId,
+        snapshotDate: date,
+        totalSalesUsd: kpis.totalSalesUsd,
+        transactionCount: kpis.transactionCount,
+      })
+      .onConflictDoUpdate({
+        target: [kpiSnapshots.businessId, kpiSnapshots.snapshotDate],
+        set: {
+          totalSalesUsd: kpis.totalSalesUsd,
+          transactionCount: kpis.transactionCount,
+          updatedAt: new Date(),
+        },
+      });
+
+    await tx
+      .update(businesses)
+      .set({ lastSnapshotAt: date })
+      .where(sql`${businesses.id} = ${businessId}`);
+
+    return { success: true };
+  });
+}
+```
+
+La transacción garantiza que ambas operaciones son atómicas — o las dos pasan, o ninguna.
+
+### 4. Subqueries tipadas
+
+Drizzle permite subqueries tipadas que TypeScript puede validar en tiempo de compilación:
+
+```ts
+// Seleccionar negocios que tuvieron ventas este mes
+const activeBusinessesSubquery = db
+  .select({ businessId: salesEvents.businessId })
+  .from(salesEvents)
+  .where(
+    sql`${salesEvents.createdAt} >= DATE_TRUNC('month', NOW())`,
+  )
+  .as('active_businesses');
+
+const result = await db
+  .select()
+  .from(businesses)
+  .where(
+    sql`${businesses.id} IN (SELECT business_id FROM ${activeBusinessesSubquery})`,
+  );
+```
+
+La diferencia con usar `sql` raw: Drizzle sabe los tipos de `activeBusinessesSubquery.businessId`. Si cambias el nombre del campo en el schema, el compilador lo detecta.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Query de tendencias con CTE + window function"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a construir una función que calcule la tendencia de ventas de los últimos 6 meses para un tenant, comparando cada mes con el anterior.
+
+**Paso 1**: Define el tipo de resultado.
+
+```ts
+// src/reports/types.ts
+export interface MonthlyTrendRow {
+  month: string;
+  totalUsd: number;
+  priorMonthUsd: number | null;
+  changePercent: number | null;
+}
+```
+
+**Paso 2**: Escribe la query usando CTE + window function.
+
+```ts
+// src/reports/sales-trends.service.ts
+import { Injectable } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { sql } from 'drizzle-orm';
+import * as schema from '../drizzle/schema';
+import { MonthlyTrendRow } from './types';
+
+@Injectable()
+export class SalesTrendsService {
+  constructor(
+    @Inject('DRIZZLE')
+    private readonly db: NodePgDatabase<typeof schema>,
+  ) {}
+
+  async getMonthlyTrend(businessId: string, months = 6): Promise<MonthlyTrendRow[]> {
+    const monthlySales = this.db.$with('monthly_sales').as(
+      this.db
+        .select({
+          month: sql<string>`DATE_TRUNC('month', created_at)::text`.as('month'),
+          totalUsd: sql<number>`SUM(usd_equivalent)`.as('total_usd'),
+        })
+        .from(schema.salesEvents)
+        .where(sql`business_id = ${businessId}`)
+        .groupBy(sql`DATE_TRUNC('month', created_at)`),
+    );
+
+    const withTrend = this.db.$with('with_trend').as(
+      this.db
+        .with(monthlySales)
+        .select({
+          month: monthlySales.month,
+          totalUsd: monthlySales.totalUsd,
+          priorMonthUsd: sql<number | null>`
+            LAG(${monthlySales.totalUsd}) OVER (ORDER BY ${monthlySales.month})
+          `.as('prior_month_usd'),
+        })
+        .from(monthlySales),
+    );
+
+    const rows = await this.db
+      .with(monthlySales, withTrend)
+      .select({
+        month: withTrend.month,
+        totalUsd: withTrend.totalUsd,
+        priorMonthUsd: withTrend.priorMonthUsd,
+        changePercent: sql<number | null>`
+          CASE
+            WHEN ${withTrend.priorMonthUsd} IS NULL OR ${withTrend.priorMonthUsd} = 0 THEN NULL
+            ELSE ROUND(
+              (${withTrend.totalUsd} - ${withTrend.priorMonthUsd}) / ${withTrend.priorMonthUsd} * 100,
+              2
+            )
+          END
+        `.as('change_percent'),
+      })
+      .from(withTrend)
+      .orderBy(sql`${withTrend.month} DESC`)
+      .limit(months);
+
+    return rows as MonthlyTrendRow[];
+  }
+}
+```
+
+**Paso 3**: Verifica mentalmente la query.
+
+La query tiene 3 CTEs encadenadas:
+
+1. `monthly_sales`: agrupa ventas por mes.
+2. `with_trend`: agrega el total del mes anterior via `LAG`.
+3. Query final: calcula el porcentaje de cambio.
+
+Cada capa tiene un nombre descriptivo y puedes leer la query de arriba a abajo.
+
+**Verificación**: si tuvieras datos reales de 6 meses en `sales_events`, el resultado debería tener 6 filas, donde la primera fila (más antigua) tiene `priorMonthUsd: null` y `changePercent: null`, y las restantes tienen los dos valores calculados.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="drizzle-avanzado">
+
+- [ ] Puedo construir una CTE con `db.$with()` y encadenar múltiples CTEs en una sola query.
+- [ ] Entiendo cuándo usar una window function en lugar de `GROUP BY` y puedo nombrar al menos dos casos concretos.
+- [ ] Puedo usar `db.transaction()` para agrupar varias operaciones en una sola unidad atómica.
+- [ ] Puedo construir una subquery tipada que TypeScript pueda validar en compilación.
+
+</Checkpoint>
+
+## Próxima unidad → [PostgreSQL avanzado](../postgresql-avanzado/)

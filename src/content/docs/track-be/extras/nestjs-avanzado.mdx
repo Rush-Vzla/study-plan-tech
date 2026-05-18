@@ -1,0 +1,329 @@
+---
+title: "NestJS avanzado: lifecycle, providers y módulos dinámicos"
+description: OnModuleInit, forRoot/forRootAsync, y custom providers con factory — los patrones que separan el uso básico del uso experto de NestJS.
+sidebar:
+  order: 1
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-be'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-be]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-be/nestjs-fundamentos
+  - track-be/nestjs-guards-pipes
+learning_outcomes:
+  - "Usar OnModuleInit para ejecutar lógica de inicialización de forma predecible"
+  - "Crear módulos dinámicos con forRoot y forRootAsync para configuración en runtime"
+  - "Implementar custom providers con useFactory para inyectar dependencias complejas"
+  - "Entender cuándo un custom provider resuelve problemas que un provider simple no puede"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  nestjs: '11'
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Rush no usa estas técnicas en todos lados, pero las vas a ver en módulos específicos como el de configuración de Drizzle, el de Redis y el de BullMQ. Esta unidad te explica por qué existen y cuándo las necesitas.
+
+## 1. Conceptos
+
+### 1. ¿Qué es el lifecycle de un módulo y por qué importa?
+
+Fíjate que cuando NestJS arranca, no solo registra providers — los inicializa en un orden específico. Si un provider necesita conectarse a una base de datos antes de estar listo para recibir requests, tienes que decirle eso explícitamente.
+
+La interfaz `OnModuleInit` te da ese hook:
+
+```ts
+// src/database/database.module.ts
+import { Injectable, OnModuleInit } from '@nestjs/common';
+
+@Injectable()
+export class DatabaseService implements OnModuleInit {
+  async onModuleInit() {
+    await this.connect();
+  }
+
+  private async connect() {
+    // conexión real a la DB
+  }
+}
+```
+
+Lo que pasa es que NestJS llama `onModuleInit` después de resolver todas las dependencias del módulo pero antes de que el módulo esté listo para manejar requests. Es el lugar correcto para warmup de conexiones, carga de configuración externa, y validaciones críticas de startup.
+
+También existe `OnApplicationBootstrap` — se llama cuando TODO el árbol de módulos está inicializado, no solo el tuyo. Úsalo cuando necesitas que otro módulo ya esté listo.
+
+### 2. Módulos dinámicos: forRoot vs forRootAsync
+
+El patrón `forRoot` es cómo NestJS implementa módulos configurables. Si alguna vez usaste `TypeOrmModule.forRoot({ ... })` o `BullModule.forRoot({ ... })`, eso es un módulo dinámico.
+
+El problema que resuelven es simple: un módulo necesita configuración externa (credenciales, timeouts, opciones de retry) que no puedes hardcodear en el decorador `@Module`.
+
+```ts
+// src/redis/redis.module.ts
+import { DynamicModule, Module } from '@nestjs/common';
+
+export interface RedisConfig {
+  host: string;
+  port: number;
+}
+
+@Module({})
+export class RedisModule {
+  static forRoot(config: RedisConfig): DynamicModule {
+    return {
+      module: RedisModule,
+      providers: [
+        {
+          provide: 'REDIS_CONFIG',
+          useValue: config,
+        },
+        RedisService,
+      ],
+      exports: [RedisService],
+      global: true,
+    };
+  }
+}
+```
+
+`forRootAsync` va un paso más allá: permite que la configuración sea asíncrona, lo que necesitas cuando el config viene de un servicio como `ConfigService`:
+
+```ts
+static forRootAsync(options: {
+  useFactory: (...args: any[]) => Promise<RedisConfig> | RedisConfig;
+  inject?: any[];
+}): DynamicModule {
+  return {
+    module: RedisModule,
+    imports: options.imports ?? [],
+    providers: [
+      {
+        provide: 'REDIS_CONFIG',
+        useFactory: options.useFactory,
+        inject: options.inject ?? [],
+      },
+      RedisService,
+    ],
+    exports: [RedisService],
+    global: true,
+  };
+}
+```
+
+Uso en `AppModule`:
+
+```ts
+RedisModule.forRootAsync({
+  inject: [ConfigService],
+  useFactory: (config: ConfigService) => ({
+    host: config.get('REDIS_HOST'),
+    port: config.get<number>('REDIS_PORT'),
+  }),
+}),
+```
+
+¿Ves por qué `forRootAsync` es importante? Porque `ConfigService` es un provider de NestJS — no puedes llamarlo antes de que el DI container esté listo. `useFactory` resuelve eso: NestJS lo llama cuando ya tiene todo listo.
+
+### 3. Custom providers con useFactory
+
+Acá está el punto: no todos los providers son simples clases con `@Injectable()`. A veces necesitas crear un objeto con lógica de inicialización compleja, o envolver una librería de terceros que no sabe nada de NestJS.
+
+Los custom providers te dan control total:
+
+```ts
+// src/drizzle/drizzle.provider.ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from './schema';
+
+export const DrizzleProvider = {
+  provide: 'DRIZZLE',
+  inject: ['DB_CONFIG'],
+  useFactory: async (config: { connectionString: string }) => {
+    const pool = new Pool({ connectionString: config.connectionString });
+    return drizzle(pool, { schema });
+  },
+};
+```
+
+En cualquier service que necesite la DB:
+
+```ts
+@Injectable()
+export class SalesService {
+  constructor(
+    @Inject('DRIZZLE')
+    private readonly db: NodePgDatabase<typeof schema>,
+  ) {}
+}
+```
+
+La diferencia clave: `useClass` instancia una clase, `useValue` inyecta un valor estático, `useFactory` ejecuta una función (que puede ser async) para producir el valor a inyectar. `useFactory` es el más flexible de los tres.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Módulo Redis con forRootAsync"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a crear un `RedisModule` que siga el patrón `forRootAsync` y expose un `RedisService` que otros módulos pueden inyectar.
+
+**Paso 1**: Crea la estructura del módulo.
+
+```text
+src/
+  redis/
+    redis.module.ts
+    redis.service.ts
+    redis.types.ts
+```
+
+**Paso 2**: Define el tipo de configuración en `redis.types.ts`.
+
+```ts
+// src/redis/redis.types.ts
+export interface RedisModuleOptions {
+  host: string;
+  port: number;
+  password?: string;
+  db?: number;
+}
+```
+
+**Paso 3**: Implementa `RedisService` con `OnModuleInit` para conectar al arrancar.
+
+```ts
+// src/redis/redis.service.ts
+import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common';
+import { createClient, RedisClientType } from 'redis';
+import { RedisModuleOptions } from './redis.types';
+
+@Injectable()
+export class RedisService implements OnModuleInit {
+  private readonly logger = new Logger(RedisService.name);
+  private client!: RedisClientType;
+
+  constructor(
+    @Inject('REDIS_OPTIONS')
+    private readonly options: RedisModuleOptions,
+  ) {}
+
+  async onModuleInit() {
+    this.client = createClient({
+      socket: { host: this.options.host, port: this.options.port },
+      password: this.options.password,
+      database: this.options.db ?? 0,
+    }) as RedisClientType;
+
+    this.client.on('error', (err) => this.logger.error('Redis error', err));
+    await this.client.connect();
+    this.logger.log('Redis connected');
+  }
+
+  getClient(): RedisClientType {
+    return this.client;
+  }
+
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (ttlSeconds) {
+      await this.client.set(key, value, { EX: ttlSeconds });
+    } else {
+      await this.client.set(key, value);
+    }
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.client.get(key);
+  }
+
+  async del(key: string): Promise<void> {
+    await this.client.del(key);
+  }
+}
+```
+
+**Paso 4**: Implementa `RedisModule` con `forRoot` y `forRootAsync`.
+
+```ts
+// src/redis/redis.module.ts
+import { DynamicModule, Module, ModuleMetadata } from '@nestjs/common';
+import { RedisService } from './redis.service';
+import { RedisModuleOptions } from './redis.types';
+
+interface RedisModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
+  useFactory: (...args: any[]) => Promise<RedisModuleOptions> | RedisModuleOptions;
+  inject?: any[];
+}
+
+@Module({})
+export class RedisModule {
+  static forRoot(options: RedisModuleOptions): DynamicModule {
+    return {
+      module: RedisModule,
+      providers: [
+        { provide: 'REDIS_OPTIONS', useValue: options },
+        RedisService,
+      ],
+      exports: [RedisService],
+      global: true,
+    };
+  }
+
+  static forRootAsync(options: RedisModuleAsyncOptions): DynamicModule {
+    return {
+      module: RedisModule,
+      imports: options.imports ?? [],
+      providers: [
+        {
+          provide: 'REDIS_OPTIONS',
+          useFactory: options.useFactory,
+          inject: options.inject ?? [],
+        },
+        RedisService,
+      ],
+      exports: [RedisService],
+      global: true,
+    };
+  }
+}
+```
+
+**Paso 5**: Registra en `AppModule`.
+
+```ts
+// src/app.module.ts
+RedisModule.forRootAsync({
+  inject: [ConfigService],
+  useFactory: (config: ConfigService) => ({
+    host: config.getOrThrow('REDIS_HOST'),
+    port: config.getOrThrow<number>('REDIS_PORT'),
+    password: config.get('REDIS_PASSWORD'),
+    db: 0,
+  }),
+}),
+```
+
+**Verificación**: levanta la app en modo dev y verifica que el log "Redis connected" aparece al arrancar. Si ves un error de conexión, el `OnModuleInit` lo va a capturar antes de que el app empiece a recibir requests.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="nestjs-avanzado">
+
+- [ ] Puedo explicar la diferencia entre `OnModuleInit` y `OnApplicationBootstrap` y cuándo usar cada uno.
+- [ ] Puedo implementar un módulo dinámico con `forRoot` para configuración estática y `forRootAsync` para configuración que viene de `ConfigService`.
+- [ ] Puedo crear un custom provider con `useFactory` que recibe dependencias inyectadas y produce un objeto complejo.
+- [ ] Entiendo por qué `useFactory` es necesario cuando la inicialización del provider es asíncrona.
+
+</Checkpoint>
+
+## Próxima unidad → [Drizzle avanzado](../drizzle-avanzado/)

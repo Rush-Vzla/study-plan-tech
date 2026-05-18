@@ -1,0 +1,271 @@
+---
+title: "PostgreSQL avanzado: JSONB, GIN indexes y mantenimiento"
+description: JSONB queries, GIN indexes, pg_stat_statements para identificar queries lentas, y VACUUM ANALYZE para que la base de datos no se degrade con el tiempo.
+sidebar:
+  order: 3
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-be'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-be]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - modulo-0/sql-real
+  - track-be/drizzle-fundamentos
+  - track-be/rls-multi-tenant
+learning_outcomes:
+  - "Almacenar y consultar datos semiestructurados con JSONB de forma eficiente"
+  - "Crear GIN indexes para acelerar queries sobre campos JSONB"
+  - "Usar pg_stat_statements para identificar las queries más lentas en producción"
+  - "Entender cuándo y cómo ejecutar VACUUM ANALYZE en tablas con alta frecuencia de escritura"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  postgres: '17'
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Rush guarda datos de eventos en tablas append-only con esquemas fijos. Pero hay casos donde los metadatos de un evento varían por tipo y no tiene sentido crear una columna por cada variante. Ahí entra JSONB. Y para saber si tu base de datos está sufriendo en producción sin depender de alertas externas, necesitas `pg_stat_statements` y VACUUM. Esta unidad cubre los dos.
+
+## 1. Conceptos
+
+### 1. JSONB vs JSON: cuál es la diferencia y cuándo usar JSONB
+
+PostgreSQL tiene dos tipos para datos JSON: `json` y `jsonb`. La diferencia práctica es que `json` almacena el texto tal cual (con espacios, orden original de keys), mientras que `jsonb` lo descompone y almacena en formato binario.
+
+Usa `jsonb` siempre. Es más eficiente para queries porque:
+
+- Puede tener índices GIN.
+- Las operaciones de consulta son más rápidas.
+- El overhead de escritura es mínimo.
+
+Ejemplo de tabla con JSONB en Drizzle schema:
+
+```ts
+// src/drizzle/schema.ts
+import { pgTable, uuid, jsonb, timestamp, text } from 'drizzle-orm/pg-core';
+
+export const auditEvents = pgTable('audit_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull(),
+  eventType: text('event_type').notNull(),
+  payload: jsonb('payload').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+### 2. Queries sobre campos JSONB
+
+PostgreSQL tiene operadores específicos para JSONB:
+
+```sql
+-- Seleccionar el campo "amount" dentro del payload
+SELECT payload->>'amount' FROM audit_events;
+
+-- Filtrar donde el tipo dentro del payload sea "sale"
+SELECT * FROM audit_events
+WHERE payload @> '{"type": "sale"}';
+
+-- Extraer campo anidado
+SELECT payload->'metadata'->>'currency' FROM audit_events;
+
+-- Verificar existencia de key
+SELECT * FROM audit_events
+WHERE payload ? 'discount_code';
+```
+
+| Operador | Resultado | Uso |
+| --- | --- | --- |
+| `->` | jsonb | Extrae sub-elemento como jsonb |
+| `->>` | text | Extrae sub-elemento como texto |
+| `@>` | boolean | Contiene (containment check) |
+| `?` | boolean | Key existe |
+| `#>>` | text | Extrae path anidado como texto |
+
+El operador `@>` es el que más vas a usar para filtrar. Es el que se beneficia más de un índice GIN.
+
+### 3. GIN indexes: por qué los necesitas con JSONB
+
+Sin índice, una query `WHERE payload @> '{"type": "sale"}'` hace un sequential scan de toda la tabla. Con un GIN index, Postgres puede saltar directo a las filas que coinciden.
+
+```sql
+-- Crear un GIN index sobre todo el campo jsonb
+CREATE INDEX idx_audit_events_payload ON audit_events USING GIN (payload);
+
+-- GIN index solo sobre las keys de primer nivel (más liviano)
+CREATE INDEX idx_audit_events_payload_ops ON audit_events
+USING GIN (payload jsonb_path_ops);
+```
+
+`jsonb_ops` (el default) indexa todos los elementos del JSONB incluyendo keys anidadas. `jsonb_path_ops` es más liviano y eficiente para el operador `@>`, pero no soporta los operadores `?`, `?|`, `?&`.
+
+En Drizzle puedes definir el índice en el schema:
+
+```ts
+import { index } from 'drizzle-orm/pg-core';
+
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    eventType: text('event_type').notNull(),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    payloadGin: index('idx_audit_events_payload').using('gin', table.payload),
+  }),
+);
+```
+
+### 4. pg_stat_statements: encontrar las queries lentas
+
+`pg_stat_statements` es una extensión de Postgres que registra estadísticas de todas las queries ejecutadas: cuántas veces se ejecutó, cuánto tiempo total, cuánto tiempo promedio, cuántas filas procesó.
+
+Para habilitarla:
+
+```sql
+-- En postgresql.conf o como superuser:
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Verificar que está activa:
+SELECT * FROM pg_stat_statements LIMIT 5;
+```
+
+La query que más vas a usar para encontrar problemas:
+
+```sql
+SELECT
+  LEFT(query, 100) AS query_preview,
+  calls,
+  ROUND(total_exec_time::numeric, 2) AS total_ms,
+  ROUND(mean_exec_time::numeric, 2) AS avg_ms,
+  rows
+FROM pg_stat_statements
+WHERE query NOT LIKE '%pg_stat_statements%'
+ORDER BY total_exec_time DESC
+LIMIT 10;
+```
+
+Esta te muestra las 10 queries que más tiempo total consumen. Si una query aparece con `calls: 50000` y `avg_ms: 2`, está consumiendo 100 segundos de CPU total aunque individualmente parezca rápida.
+
+### 5. VACUUM ANALYZE: mantenimiento preventivo
+
+PostgreSQL usa MVCC (Multi-Version Concurrency Control) para manejar transacciones concurrentes. Eso significa que cuando haces un UPDATE o DELETE, Postgres no borra la fila — la marca como "dead tuple" y crea una versión nueva. VACUUM limpia esas dead tuples.
+
+En tablas de eventos append-only (solo INSERTs), esto no es un problema grande porque no hay dead tuples. Pero en tablas con UPDATE frecuente, como `businesses` o `kpi_snapshots`, las dead tuples acumuladas degradan el performance.
+
+```sql
+-- Vacuum manual de una tabla (no bloquea reads ni writes)
+VACUUM ANALYZE kpi_snapshots;
+
+-- Ver el estado de vacuum de las tablas
+SELECT
+  schemaname,
+  relname AS table_name,
+  n_dead_tup AS dead_tuples,
+  n_live_tup AS live_tuples,
+  last_vacuum,
+  last_autovacuum
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC
+LIMIT 10;
+```
+
+Autovacuum está habilitado por default en Postgres y cubre la mayoría de los casos. Pero si ves que una tabla acumula dead tuples rápidamente y el autovacuum no alcanza a limpiar, puedes bajar el threshold para esa tabla específica:
+
+```sql
+ALTER TABLE kpi_snapshots
+SET (autovacuum_vacuum_scale_factor = 0.05);
+```
+
+El default es 0.2 (20% de la tabla). Con 0.05 (5%), autovacuum dispara más seguido en esa tabla.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Auditoría de performance con pg_stat_statements"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a simular el proceso de encontrar y resolver una query lenta usando `pg_stat_statements` y JSONB indexes.
+
+**Escenario**: la tabla `audit_events` tiene 500,000 filas y una query `WHERE payload @> '{"event_type": "sale"}'` está apareciendo como la más lenta en `pg_stat_statements`.
+
+**Paso 1**: Verificar que la extensión está activa.
+
+```sql
+SELECT extname, extversion
+FROM pg_extension
+WHERE extname = 'pg_stat_statements';
+```
+
+Si no está, pedirle al DBA que la habilite. En producción no puedes hacerlo tú solo sin acceso de superuser.
+
+**Paso 2**: Identificar la query problemática.
+
+```sql
+SELECT
+  LEFT(query, 120) AS query_preview,
+  calls,
+  ROUND(mean_exec_time::numeric, 2) AS avg_ms,
+  ROUND(total_exec_time::numeric, 2) AS total_ms
+FROM pg_stat_statements
+WHERE query ILIKE '%audit_events%'
+ORDER BY mean_exec_time DESC
+LIMIT 5;
+```
+
+**Paso 3**: Verificar si existe un índice sobre `payload`.
+
+```sql
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'audit_events';
+```
+
+Si no hay un GIN index en `payload`, eso explica el scan secuencial.
+
+**Paso 4**: Crear el índice.
+
+```sql
+CREATE INDEX CONCURRENTLY idx_audit_events_payload
+ON audit_events USING GIN (payload jsonb_path_ops);
+```
+
+`CONCURRENTLY` crea el índice sin bloquear la tabla. Toma más tiempo pero no afecta los requests en curso.
+
+**Paso 5**: Verificar mejora.
+
+```sql
+EXPLAIN ANALYZE
+SELECT * FROM audit_events
+WHERE payload @> '{"event_type": "sale"}'
+LIMIT 100;
+```
+
+Busca "Bitmap Heap Scan" o "Index Scan" en el plan — eso indica que el índice se está usando. Si ves "Seq Scan", el planner decidió que el índice no ayuda (puede pasar si la tabla es pequeña o el filtro devuelve demasiadas filas).
+
+**Verificación**: el `avg_ms` de esa query en `pg_stat_statements` debería bajar en las próximas horas de uso normal. Los stats no se borran solos — acumulan historial hasta que se hace `SELECT pg_stat_statements_reset()`.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="postgresql-avanzado">
+
+- [ ] Puedo explicar la diferencia entre `json` y `jsonb` y por qué siempre se usa `jsonb` en producción.
+- [ ] Puedo escribir queries con los operadores `->`, `->>`, `@>` y sé cuándo usar cada uno.
+- [ ] Sé crear un GIN index en Drizzle schema y entiendo la diferencia entre `jsonb_ops` y `jsonb_path_ops`.
+- [ ] Puedo usar `pg_stat_statements` para identificar las queries más lentas por `mean_exec_time` y `total_exec_time`.
+- [ ] Entiendo qué son las dead tuples y cuándo ejecutar `VACUUM ANALYZE` manualmente.
+
+</Checkpoint>
+
+## Próxima unidad → [Event Sourcing completo](../event-sourcing-completo/)

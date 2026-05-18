@@ -1,0 +1,273 @@
+---
+title: "CQRS: separar escrituras de lecturas"
+description: Command/Query Responsibility Segregation — cómo separar el modelo de escritura del modelo de lectura, cuándo tiene sentido en Rush, y cuándo es sobreingeniería.
+sidebar:
+  order: 5
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-be'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-be]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-be/clean-arch-modulos
+  - track-be/ddd-ligero
+  - track-be/kpi-snapshots
+learning_outcomes:
+  - "Implementar el patrón Command/Query Separation en un módulo NestJS"
+  - "Crear un read model separado que sirve queries sin pasar por el modelo de escritura"
+  - "Identificar cuándo CQRS resuelve un problema real en Rush"
+  - "Saber cuándo NO aplicar CQRS para evitar complejidad innecesaria"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  nestjs: '11'
+  drizzle: '0.36'
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Rush no usa CQRS hoy. Esta unidad te muestra cuándo SÍ tiene sentido aplicarlo en un negocio que crezca, cómo implementarlo sin sobrecomplicar el código, y los criterios para no aplicarlo cuando no es necesario.
+
+## 1. Conceptos
+
+### 1. Qué es CQRS y qué problema resuelve
+
+CQRS viene de "Command Query Responsibility Segregation". La idea central es separar las operaciones que cambian estado (Commands) de las que solo leen estado (Queries), y posiblemente usar modelos de datos distintos para cada una.
+
+La versión simple: en vez de tener un `SalesService` que hace todo, tienes:
+
+- `SalesCommandService` — procesa commands (`CreateSale`, `VoidSale`, `RecordPayment`). Escribe en el modelo de escritura.
+- `SalesQueryService` — responde queries (`GetSaleSummary`, `GetTenantDashboard`). Lee desde el modelo de lectura (que puede ser una proyección optimizada).
+
+¿Por qué separarlos? Porque la forma óptima de escribir datos y la forma óptima de leerlos son diferentes. Un INSERT va al modelo normalizado. Un dashboard quiere datos ya denormalizados y agregados.
+
+### 2. Commands y Queries: implementación básica en NestJS
+
+```ts
+// src/sales/commands/create-sale.command.ts
+export class CreateSaleCommand {
+  constructor(
+    public readonly businessId: string,
+    public readonly amount: number,
+    public readonly currency: string,
+    public readonly idempotencyKey: string,
+  ) {}
+}
+
+// src/sales/commands/create-sale.handler.ts
+import { Injectable } from '@nestjs/common';
+import { CreateSaleCommand } from './create-sale.command';
+
+@Injectable()
+export class CreateSaleHandler {
+  constructor(
+    private readonly salesRepository: SalesWriteRepository,
+    private readonly idempotencyService: IdempotencyService,
+  ) {}
+
+  async execute(command: CreateSaleCommand): Promise<{ saleId: string }> {
+    return this.idempotencyService.withKey(command.idempotencyKey, async () => {
+      const saleId = await this.salesRepository.insert({
+        businessId: command.businessId,
+        amount: command.amount,
+        currency: command.currency,
+        status: 'pending',
+      });
+
+      return { saleId };
+    });
+  }
+}
+```
+
+```ts
+// src/sales/queries/get-tenant-dashboard.query.ts
+export class GetTenantDashboardQuery {
+  constructor(
+    public readonly businessId: string,
+    public readonly period: 'today' | 'week' | 'month',
+  ) {}
+}
+
+// src/sales/queries/get-tenant-dashboard.handler.ts
+import { Injectable } from '@nestjs/common';
+import { GetTenantDashboardQuery } from './get-tenant-dashboard.query';
+
+export interface TenantDashboard {
+  totalSalesUsd: number;
+  transactionCount: number;
+  topProducts: Array<{ name: string; totalUsd: number }>;
+}
+
+@Injectable()
+export class GetTenantDashboardHandler {
+  constructor(private readonly salesReadDb: SalesReadRepository) {}
+
+  async execute(query: GetTenantDashboardQuery): Promise<TenantDashboard> {
+    return this.salesReadDb.getDashboard(query.businessId, query.period);
+  }
+}
+```
+
+Acá está el punto clave: `GetTenantDashboardHandler` usa `SalesReadRepository`, que puede leer desde una vista materializada, un read model denormalizado, o una proyección de eventos. No le importa cómo se escribieron los datos.
+
+### 3. Read models separados
+
+Un read model es una tabla (o vista) optimizada específicamente para lecturas. En vez de hacer JOINs complejos en el momento de la query, mantienes una tabla ya unida:
+
+```ts
+// Schema del read model de dashboard
+export const tenantDashboardReadModel = pgTable('tenant_dashboard_read_model', {
+  businessId: uuid('business_id').primaryKey(),
+  period: text('period').notNull(),
+  totalSalesUsd: numeric('total_sales_usd').notNull(),
+  transactionCount: integer('transaction_count').notNull(),
+  topProductsJson: jsonb('top_products_json').notNull(),
+  lastUpdatedAt: timestamp('last_updated_at', { withTimezone: true }).notNull(),
+});
+```
+
+Este read model se actualiza por:
+
+1. Un job de BullMQ que se dispara cuando hay un nuevo evento de venta.
+2. Un job periódico que recalcula cada N minutos.
+3. Directamente en la transacción del command (CQRS "síncrono").
+
+La opción 3 es la más simple pero introduce acoplamiento. Las opciones 1 y 2 son eventualmente consistentes — el dashboard puede estar N segundos desactualizado, lo cual es aceptable en la mayoría de los casos.
+
+### 4. Cuándo SÍ aplica CQRS en Rush
+
+Rush tiene un caso concreto donde CQRS tiene sentido: los dashboards de KPIs.
+
+El modelo de escritura son las tablas de eventos (`sales_events`, `input_cost_events`). El modelo de lectura son los KPI snapshots. Ya tienes una separación implícita — CQRS la hace explícita con nomenclatura clara y handlers separados.
+
+Tiene sentido aplicarlo cuando:
+
+- Las queries de lectura son significativamente más complejas que las de escritura.
+- Necesitas escalar lecturas y escrituras de forma independiente.
+- El mismo conjunto de datos alimenta múltiples read models distintos.
+
+### 5. Cuándo NO aplicar CQRS
+
+No lo apliques cuando:
+
+- El CRUD es simple y los datos de lectura y escritura son casi idénticos.
+- El equipo es pequeño y la complejidad adicional va a costar más de lo que ayuda.
+- La latencia eventual en el read model no es aceptable para tu caso de uso.
+
+En Rush hoy: los módulos simples como `businesses`, `users`, y `invitations` no necesitan CQRS. Solo `sales` y `kpi-snapshots` son candidatos cuando el producto crezca.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Module de ventas con Command y Query separados"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a refactorizar un `SalesService` monolítico a un patrón CQRS con handlers separados.
+
+**Estado inicial** (el patrón que queremos reemplazar):
+
+```ts
+// src/sales/sales.service.ts — ANTES
+@Injectable()
+export class SalesService {
+  async createSale(dto: CreateSaleDto): Promise<Sale> { ... }
+  async voidSale(id: string): Promise<void> { ... }
+  async getSale(id: string): Promise<Sale> { ... }
+  async getDashboard(businessId: string): Promise<Dashboard> { ... }
+}
+```
+
+**Estado objetivo** (CQRS explícito):
+
+```text
+src/sales/
+  commands/
+    create-sale.command.ts
+    create-sale.handler.ts
+    void-sale.command.ts
+    void-sale.handler.ts
+  queries/
+    get-sale.query.ts
+    get-sale.handler.ts
+    get-dashboard.query.ts
+    get-dashboard.handler.ts
+  sales.module.ts
+  sales.controller.ts
+```
+
+**Paso 1**: El controller despacha commands y queries.
+
+```ts
+// src/sales/sales.controller.ts
+@Controller('sales')
+export class SalesController {
+  constructor(
+    private readonly createSaleHandler: CreateSaleHandler,
+    private readonly getDashboardHandler: GetTenantDashboardHandler,
+  ) {}
+
+  @Post()
+  async createSale(@Body() dto: CreateSaleDto) {
+    const command = new CreateSaleCommand(
+      dto.businessId,
+      dto.amount,
+      dto.currency,
+      dto.idempotencyKey,
+    );
+    return this.createSaleHandler.execute(command);
+  }
+
+  @Get('dashboard/:businessId')
+  async getDashboard(
+    @Param('businessId') businessId: string,
+    @Query('period') period: 'today' | 'week' | 'month' = 'month',
+  ) {
+    const query = new GetTenantDashboardQuery(businessId, period);
+    return this.getDashboardHandler.execute(query);
+  }
+}
+```
+
+**Paso 2**: Registra todos los handlers en `SalesModule`.
+
+```ts
+// src/sales/sales.module.ts
+@Module({
+  controllers: [SalesController],
+  providers: [
+    CreateSaleHandler,
+    VoidSaleHandler,
+    GetSaleHandler,
+    GetTenantDashboardHandler,
+    SalesWriteRepository,
+    SalesReadRepository,
+  ],
+})
+export class SalesModule {}
+```
+
+**Verificación**: el controller no contiene lógica — solo despacha. Cada handler tiene una sola responsabilidad. Puedes testear `CreateSaleHandler` sin tocar `GetTenantDashboardHandler`.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="cqrs-pattern">
+
+- [ ] Puedo separar un `SalesService` monolítico en handlers de Command y Query con responsabilidades claras.
+- [ ] Entiendo la diferencia entre el modelo de escritura (normalizado) y el modelo de lectura (denormalizado/proyección) y cuándo mantenerlos separados.
+- [ ] Puedo nombrar dos situaciones concretas donde CQRS resuelve un problema real en Rush, y dos donde sería sobreingeniería.
+- [ ] Entiendo las implicaciones de consistencia eventual cuando el read model se actualiza de forma asíncrona.
+
+</Checkpoint>
+
+## Fin del track de extras — Backend
+
+Si llegaste hasta acá, terminaste las 5 unidades del track de extras de Backend. El próximo paso natural es revisar el [Track Frontend](../../track-fe/) si todavía no lo hiciste.

@@ -1,0 +1,334 @@
+---
+title: "Event Sourcing completo: proyecciones, snapshots y cuándo usarlo"
+description: Proyecciones, snapshots de aggregate y los casos concretos donde Event Sourcing completo tiene sentido — más allá del patrón append-only que ya usa Rush.
+sidebar:
+  order: 4
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-be'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-be]
+estimated_hours: 4
+extra: true
+prerequisites:
+  - track-be/append-only-eventos
+  - track-be/compensating-events
+  - track-be/kpi-snapshots
+learning_outcomes:
+  - "Diferenciar el patrón append-only de Rush del Event Sourcing completo"
+  - "Implementar proyecciones que reconstruyen estado desde un stream de eventos"
+  - "Usar snapshots de aggregate para evitar replay de streams largos"
+  - "Identificar los casos donde Event Sourcing completo justifica su complejidad"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  postgres: '17'
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Rush no usa Event Sourcing completo hoy. Usa append-only events — que es parte del mismo espectro, pero no lo mismo. Esta unidad te explica la diferencia, te enseña los patrones del ES completo, y te da los criterios para saber cuándo tiene sentido aplicarlo en un negocio que crezca.
+
+## 1. Conceptos
+
+### 1. Append-only de Rush vs Event Sourcing completo
+
+Fíjate en la diferencia:
+
+| Aspecto | Rush (append-only) | Event Sourcing completo |
+| --- | --- | --- |
+| Estado actual | Columna `current_state` en tabla separada | Reconstruido al hacer replay de eventos |
+| Acceso a estado | SELECT directo | Requiere replay o proyección |
+| Snapshots | KPI snapshots separados | Snapshots del aggregate para cortar el replay |
+| Queries | SQL estándar sobre estado | Queries sobre proyecciones (read models) |
+| Complejidad | Baja | Alta |
+| Historial completo | Sí (solo escritura) | Sí (es el source of truth) |
+
+Rush hace lo correcto para su etapa actual: guarda eventos para auditoría y calcula estado materializado periódicamente. Event Sourcing completo invierte eso: los eventos son el estado principal y el estado derivado es siempre una proyección.
+
+### 2. Aggregates y proyecciones
+
+En Event Sourcing, un **aggregate** es la unidad de consistencia. Un `SalesAggregate` agrupa todos los eventos de una venta y expone el estado actual reconstruyéndolos.
+
+Una **proyección** es una función que toma un stream de eventos y produce una vista de estado específica. Puedes tener múltiples proyecciones del mismo stream:
+
+```ts
+// Tipos de eventos de una venta
+type SaleEvent =
+  | { type: 'SaleCreated'; saleId: string; businessId: string; amount: number; currency: string }
+  | { type: 'SaleAmountUpdated'; saleId: string; newAmount: number }
+  | { type: 'SaleVoided'; saleId: string; reason: string }
+  | { type: 'SalePaid'; saleId: string; paidAt: string };
+
+// Estado del aggregate reconstruido desde eventos
+interface SaleState {
+  id: string;
+  businessId: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'paid' | 'voided';
+  voidReason?: string;
+  paidAt?: string;
+}
+
+// Proyección: reconstruye el estado actual
+function projectSaleState(events: SaleEvent[]): SaleState | null {
+  let state: SaleState | null = null;
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'SaleCreated':
+        state = {
+          id: event.saleId,
+          businessId: event.businessId,
+          amount: event.amount,
+          currency: event.currency,
+          status: 'pending',
+        };
+        break;
+      case 'SaleAmountUpdated':
+        if (state) state.amount = event.newAmount;
+        break;
+      case 'SaleVoided':
+        if (state) {
+          state.status = 'voided';
+          state.voidReason = event.reason;
+        }
+        break;
+      case 'SalePaid':
+        if (state) {
+          state.status = 'paid';
+          state.paidAt = event.paidAt;
+        }
+        break;
+    }
+  }
+
+  return state;
+}
+```
+
+Esta función es determinista: los mismos eventos siempre producen el mismo estado. Eso es lo que hace que Event Sourcing sea auditable y reproducible.
+
+### 3. Snapshots de aggregate: cuándo y cómo
+
+El problema con la proyección pura es la performance: si una venta tiene 10,000 eventos históricos, cada lectura hace replay de 10,000 eventos. Los snapshots cortan ese replay.
+
+Un snapshot guarda el estado del aggregate en un punto en el tiempo. El siguiente replay parte del snapshot más reciente:
+
+```ts
+interface AggregateSnapshot {
+  aggregateId: string;
+  aggregateType: string;
+  state: unknown;
+  lastEventSequence: number;
+  createdAt: Date;
+}
+
+async function loadSaleWithSnapshot(
+  saleId: string,
+  db: Database,
+): Promise<SaleState | null> {
+  // 1. Buscar el snapshot más reciente
+  const snapshot = await db
+    .select()
+    .from(aggregateSnapshots)
+    .where(
+      and(
+        eq(aggregateSnapshots.aggregateId, saleId),
+        eq(aggregateSnapshots.aggregateType, 'Sale'),
+      ),
+    )
+    .orderBy(desc(aggregateSnapshots.lastEventSequence))
+    .limit(1);
+
+  const fromSequence = snapshot[0]?.lastEventSequence ?? 0;
+  const baseState = snapshot[0]?.state as SaleState | undefined;
+
+  // 2. Cargar solo los eventos posteriores al snapshot
+  const events = await db
+    .select()
+    .from(saleEvents)
+    .where(
+      and(
+        eq(saleEvents.aggregateId, saleId),
+        gt(saleEvents.sequence, fromSequence),
+      ),
+    )
+    .orderBy(asc(saleEvents.sequence));
+
+  // 3. Aplicar eventos sobre el estado del snapshot
+  const eventsToApply = events.map((e) => e.payload as SaleEvent);
+
+  if (baseState) {
+    return applyEventsToState(baseState, eventsToApply);
+  }
+
+  return projectSaleState(eventsToApply);
+}
+
+function applyEventsToState(base: SaleState, events: SaleEvent[]): SaleState {
+  let state = { ...base };
+  for (const event of events) {
+    if (event.type === 'SaleAmountUpdated') state.amount = event.newAmount;
+    if (event.type === 'SaleVoided') {
+      state.status = 'voided';
+      state.voidReason = event.reason;
+    }
+    if (event.type === 'SalePaid') {
+      state.status = 'paid';
+      state.paidAt = event.paidAt;
+    }
+  }
+  return state;
+}
+```
+
+La regla práctica: crear un snapshot cada N eventos (por ejemplo, cada 50 eventos). El replay máximo es entonces N eventos, no el stream completo.
+
+### 4. Cuándo sí tiene sentido Event Sourcing completo
+
+Rush no lo usa porque su estado actual es manejable con append-only + snapshots periódicos. Pero hay casos donde ES completo tiene sentido:
+
+1. **Auditoría regulatoria con reversibilidad**: si necesitas poder reconstruir el estado de cualquier entidad en cualquier momento del pasado (no solo los KPIs agregados, sino el estado exacto de un pedido a las 14:32 del 3 de enero), ES completo te da eso de forma natural.
+
+2. **Múltiples read models del mismo stream**: si necesitas el mismo stream de eventos para alimentar reportes, notificaciones, y métricas de forma independiente, las proyecciones te permiten construir cada vista de forma óptima sin duplicar la fuente.
+
+3. **Sistemas de alto volumen con contención de locks**: en ES completo, los writes son siempre inserts. No hay UPDATE con locks. Eso escala mejor en escenarios donde muchos procesos modifican el mismo aggregate.
+
+4. **Cuándo NO usarlo**: cuando el equipo es pequeño, el estado actual es simple, y no hay requisitos regulatorios de reversibilidad completa. La complejidad operacional de ES completo (gestión de snapshots, replay en deploys, migration de eventos históricos) es real y costosa.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Proyección de ventas con snapshot automático"
+  estimatedMinutes={90}
+  runnable={false}
+>
+
+En este lab vas a implementar un `SaleAggregateService` que carga el estado de una venta usando snapshots cuando están disponibles.
+
+**Paso 1**: Define los tipos en un archivo separado.
+
+```ts
+// src/sales-es/types.ts
+export type SaleStatus = 'pending' | 'paid' | 'voided';
+
+export interface SaleState {
+  id: string;
+  businessId: string;
+  amount: number;
+  currency: string;
+  status: SaleStatus;
+  voidReason?: string;
+  paidAt?: string;
+}
+
+export type SaleEvent =
+  | { type: 'SaleCreated'; saleId: string; businessId: string; amount: number; currency: string }
+  | { type: 'SaleAmountUpdated'; saleId: string; newAmount: number }
+  | { type: 'SaleVoided'; saleId: string; reason: string }
+  | { type: 'SalePaid'; saleId: string; paidAt: string };
+```
+
+**Paso 2**: Define el schema de la tabla de eventos y snapshots.
+
+```ts
+// src/sales-es/schema.ts
+import { pgTable, uuid, integer, jsonb, timestamp, text } from 'drizzle-orm/pg-core';
+
+export const saleEvents = pgTable('sale_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  aggregateId: uuid('aggregate_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  payload: jsonb('payload').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const saleSnapshots = pgTable('sale_snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  aggregateId: uuid('aggregate_id').notNull(),
+  state: jsonb('state').notNull(),
+  lastEventSequence: integer('last_event_sequence').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+**Paso 3**: Implementa la lógica de proyección.
+
+```ts
+// src/sales-es/sale.aggregate.ts
+import { SaleEvent, SaleState } from './types';
+
+const SNAPSHOT_INTERVAL = 50;
+
+export function projectFromEvents(events: SaleEvent[]): SaleState | null {
+  let state: SaleState | null = null;
+
+  for (const ev of events) {
+    switch (ev.type) {
+      case 'SaleCreated':
+        state = { id: ev.saleId, businessId: ev.businessId, amount: ev.amount, currency: ev.currency, status: 'pending' };
+        break;
+      case 'SaleAmountUpdated':
+        if (state) state = { ...state, amount: ev.newAmount };
+        break;
+      case 'SaleVoided':
+        if (state) state = { ...state, status: 'voided', voidReason: ev.reason };
+        break;
+      case 'SalePaid':
+        if (state) state = { ...state, status: 'paid', paidAt: ev.paidAt };
+        break;
+    }
+  }
+
+  return state;
+}
+
+export function shouldSnapshot(totalEvents: number): boolean {
+  return totalEvents % SNAPSHOT_INTERVAL === 0;
+}
+```
+
+**Verificación**: la función `projectFromEvents` es pura — misma entrada, misma salida, sin efectos secundarios. Puedes testearla con Vitest sin necesitar base de datos.
+
+```ts
+// src/sales-es/sale.aggregate.test.ts
+import { describe, it, expect } from 'vitest';
+import { projectFromEvents } from './sale.aggregate';
+
+describe('projectFromEvents', () => {
+  it('builds state from a complete event sequence', () => {
+    const events = [
+      { type: 'SaleCreated' as const, saleId: '1', businessId: 'b1', amount: 100, currency: 'USD' },
+      { type: 'SalePaid' as const, saleId: '1', paidAt: '2026-05-18T10:00:00Z' },
+    ];
+
+    const state = projectFromEvents(events);
+
+    expect(state?.status).toBe('paid');
+    expect(state?.amount).toBe(100);
+  });
+
+  it('returns null for empty event list', () => {
+    expect(projectFromEvents([])).toBeNull();
+  });
+});
+```
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="event-sourcing-completo">
+
+- [ ] Puedo explicar la diferencia entre append-only (lo que hace Rush hoy) y Event Sourcing completo, con al menos dos diferencias concretas.
+- [ ] Puedo implementar una función de proyección pura que reconstruye estado desde un slice de eventos.
+- [ ] Entiendo para qué sirven los snapshots de aggregate y cuándo crearlos (cada N eventos).
+- [ ] Puedo nombrar dos casos concretos donde Event Sourcing completo justifica su complejidad, y dos donde no.
+
+</Checkpoint>
+
+## Próxima unidad → [CQRS pattern](../cqrs-pattern/)
