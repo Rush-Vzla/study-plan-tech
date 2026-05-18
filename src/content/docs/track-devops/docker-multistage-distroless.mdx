@@ -1,0 +1,145 @@
+---
+title: "Docker multi-stage con imagen distroless"
+description: "Construye imágenes de producción mínimas, seguras y sin shell usando multi-stage builds y gcr.io/distroless/nodejs:nonroot."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 4
+prerequisites: ['modulo-0/docker-basico']
+learning_outcomes:
+  - "Entender por qué una imagen de producción no debe tener shell ni herramientas de desarrollo"
+  - "Separar las etapas deps, build y runtime en un Dockerfile multi-stage"
+  - "Usar gcr.io/distroless/nodejs:nonroot y configurar USER nonroot explícitamente"
+  - "Validar que la imagen resultante no tiene vulnerabilidades críticas obvias"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { node: '24', docker: '27' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Por qué no sirve una imagen de Node.js genérica en producción?**
+
+Fíjate que `node:24` pesa varios cientos de MB y trae Bash, curl, apt, y un montón de herramientas que el runtime de tu API jamás necesita. Cada herramienta adicional es una superficie de ataque. Si alguien logra Remote Code Execution en tu contenedor, con Bash instalado puede hacer mucho más daño que si el contenedor no tuviera shell.
+
+La imagen `gcr.io/distroless/nodejs:nonroot` de Google contiene exactamente lo mínimo para correr Node.js: el runtime y sus bibliotecas nativas. Sin Bash, sin curl, sin apt. Si un atacante obtiene ejecución de código, no puede hacer casi nada porque no hay herramientas disponibles.
+
+**2. ¿Qué es un multi-stage build y cómo funciona?**
+
+Un multi-stage build divide el Dockerfile en etapas. Cada `FROM` empieza una etapa nueva. Lo importante es que puedes copiar archivos de una etapa anterior sin llevarte todo lo que había en ella.
+
+Para el backend de Rush usamos tres etapas:
+
+- `deps`: instala dependencias de producción con `pnpm install --frozen-lockfile --prod`.
+- `build`: parte de deps, instala dev-deps, compila TypeScript, produce `dist/`.
+- `runtime`: parte de la imagen distroless, copia solo `node_modules/` de `deps` y `dist/` de `build`.
+
+El resultado final es una imagen que tiene el runtime de Node, tus módulos de producción y el JavaScript compilado. Nada más.
+
+**3. ¿Por qué el usuario importa? ¿Qué significa `nonroot`?**
+
+Por defecto, los procesos dentro de un contenedor Docker corren como `root` (UID 0). Eso es un problema porque si alguien escapa del contenedor al host, tiene privilegios de root en el sistema operativo del Droplet.
+
+La imagen `:nonroot` de distroless crea un usuario con UID 65532. La instrucción `USER nonroot` le dice a Docker que el proceso principal corra con ese usuario. Si hay una vulnerabilidad de escape de contenedor, el atacante llega al host como UID 65532, no como root.
+
+En Rush, esto es obligatorio. El pipeline de CI falla si la imagen no declara `USER nonroot`.
+
+### Más allá de Rush (opcional)
+
+Existen alternativas como Alpine (`node:24-alpine`, ~50MB) que también reducen tamaño. La diferencia con distroless es que Alpine sí tiene un shell (ash) y un package manager (apk). Distroless elimina incluso eso. Para APIs en producción sin necesidad de debugging interactivo, distroless es la opción más defensiva.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Dockerfile multi-stage para el backend de Rush"
+  estimatedMinutes={80}
+  runnable={false}
+>
+
+El objetivo es escribir un Dockerfile que produzca una imagen mínima, sin shell, corriendo como nonroot. No vas a correr este Dockerfile aquí, pero sí vas a entender cada instrucción.
+
+### Etapa 1: deps
+
+Esta etapa parte de la imagen de Node con Alpine (que sí tiene pnpm disponible fácilmente para instalar dependencias) y solo instala dependencias de producción.
+
+```dockerfile
+FROM node:24-alpine AS deps
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10 --activate
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+```
+
+Usamos Alpine aquí porque tiene el tooling necesario para compilar dependencias nativas si las hay. En `runtime` nos pasamos a distroless.
+
+### Etapa 2: build
+
+Esta etapa parte de `deps`, agrega dev-dependencies y compila TypeScript.
+
+```dockerfile
+FROM deps AS build
+
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build
+```
+
+El `pnpm build` llama a `tsc` o a `tsup` según la configuración del proyecto. El output queda en `dist/`.
+
+### Etapa 3: runtime
+
+Esta es la etapa final — la que termina siendo la imagen publicada.
+
+```dockerfile
+FROM gcr.io/distroless/nodejs24-debian12:nonroot AS runtime
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+USER nonroot
+EXPOSE 3000
+
+CMD ["dist/main.js"]
+```
+
+Acá está el punto clave: `COPY --from=deps` y `COPY --from=build` traen solo los archivos que necesitas. La imagen `gcr.io/distroless/nodejs24-debian12:nonroot` provee el runtime de Node. `USER nonroot` asegura que el proceso principal no corra como root.
+
+### Verificación del tamaño
+
+Para comparar antes/después en un entorno donde puedas construir:
+
+```bash
+docker build --target runtime -t rush-api:test .
+docker image inspect rush-api:test --format='{{.Size}}'
+```
+
+La imagen distroless del backend de Rush debería estar en el rango de 150-200MB, vs. más de 1GB con una imagen `node:24` base sin depurar.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/docker-multistage-distroless">
+
+- [ ] Sé explicar por qué una imagen con shell es más peligrosa que una sin shell en producción.
+- [ ] Entiendo para qué sirve cada una de las tres etapas: deps, build, runtime.
+- [ ] Sé por qué `USER nonroot` reduce el radio de blast de una vulnerabilidad de escape de contenedor.
+- [ ] Puedo leer un Dockerfile multi-stage e identificar qué archivos termina teniendo la imagen final.
+
+</Checkpoint>
+
+## Próxima unidad → [docker-compose en el Droplet](./docker-compose-droplet/)

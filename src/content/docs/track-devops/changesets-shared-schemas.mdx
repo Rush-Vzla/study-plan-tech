@@ -1,0 +1,181 @@
+---
+title: "Changesets y shared-schemas"
+description: "Versiona @rush/shared-schemas con Changesets, publícalos en GitHub Packages y entiende cómo los bots abren PRs en los repos consumidores."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 3
+prerequisites: ['modulo-0/pnpm-monorepo', 'modulo-0/zod-schemas']
+learning_outcomes:
+  - "Entender qué es Changesets y cómo decide la versión de un paquete"
+  - "Publicar @rush/shared-schemas a GitHub Packages desde CI"
+  - "Saber cómo el bot de Changesets abre PRs de versión automáticamente"
+  - "Manejar breaking changes de schemas compartidos en repos consumidores"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { node: '24' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Qué es Changesets y qué problema resuelve?**
+
+`@changesets/cli` es una herramienta para gestionar versiones de paquetes en un monorepo. El problema que resuelve es: ¿cómo decides si un cambio es un `patch`, un `minor` o un `major`? ¿Y cómo lo comunicas al equipo?
+
+Con Changesets, cada vez que haces un cambio que impacta a los consumidores del paquete, creas un archivo de changeset. Ese archivo es parte del commit y describe qué cambió y con qué impacto en semver.
+
+Cuando llega el momento de publicar, Changesets lee todos los archivos de changeset acumulados, determina la nueva versión, actualiza el `package.json`, genera el `CHANGELOG.md` y crea el tag de git.
+
+**2. ¿Qué es `@rush/shared-schemas` y quién lo consume?**
+
+`@rush/shared-schemas` es el paquete que contiene los schemas Zod compartidos entre el backend y el frontend de Rush. Cosas como el schema de una venta, el schema de un negocio, los tipos de respuesta de la API.
+
+Lo consume:
+
+- El backend de NestJS (para validar requests y tipar responses).
+- El frontend de React (para validar responses de la API y tipar formularios).
+
+Si cambias un schema en el paquete y alguno de los consumidores no actualiza, pueden aparecer errores en producción difíciles de debuggear.
+
+**3. ¿Cómo funciona el bot de Changesets?**
+
+El bot de Changesets corre en GitHub Actions. Cuando detecta archivos de changeset en un PR o en `main`, abre automáticamente un "Version PR" — un pull request que muestra exactamente qué versión va a publicarse y qué incluye el changelog.
+
+Cuando ese PR se mergea, el bot publica el paquete a GitHub Packages con la versión calculada. No hay intervención manual.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Ciclo de versioning con Changesets para shared-schemas"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+### Instalar Changesets
+
+```bash
+pnpm add -D @changesets/cli
+pnpm changeset init
+```
+
+Esto crea el directorio `.changeset/` con un archivo de configuración.
+
+### Configurar para GitHub Packages
+
+```json
+{
+  "name": "@rush/shared-schemas",
+  "version": "1.0.0",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  }
+}
+```
+
+```json
+// .changeset/config.json
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "restricted",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}
+```
+
+### Crear un changeset al modificar el schema
+
+Cuando agregas un campo nuevo al schema de ventas:
+
+```bash
+pnpm changeset
+```
+
+El CLI te hace preguntas interactivas:
+
+1. ¿Qué paquetes cambiaron? → `@rush/shared-schemas`
+2. ¿Qué tipo de cambio? → `minor` (nuevo campo opcional) o `major` (campo obligatorio que rompe consumidores)
+3. ¿Describe el cambio? → "Add payment_method field to SaleSchema"
+
+Esto crea un archivo en `.changeset/nombre-random.md`. Commitealo con el cambio.
+
+### GitHub Actions para publicar
+
+```yaml
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          registry-url: 'https://npm.pkg.github.com'
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: changesets/action@v1
+        with:
+          publish: pnpm changeset publish
+          version: pnpm changeset version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+El `changesets/action` hace todo: si hay changesets pendientes, abre el Version PR. Si el Version PR se mergea, publica el paquete.
+
+### Actualizar el consumidor después de una publicación
+
+En el repo del backend o frontend, después de que se publica una nueva versión:
+
+```bash
+pnpm update @rush/shared-schemas
+```
+
+Si es un breaking change (mayor), hay que revisar los places donde se usa el schema y actualizar.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/changesets-shared-schemas">
+
+- [ ] Puedo explicar qué problema resuelve Changesets en el ciclo de vida de `@rush/shared-schemas`.
+- [ ] Sé crear un archivo de changeset con el tipo correcto de bump (patch, minor, major).
+- [ ] Entiendo el flujo automático: changeset en PR → bot abre Version PR → mergeo → publish.
+- [ ] Sé dónde se configura el registry de GitHub Packages en `package.json` y `publishConfig`.
+
+</Checkpoint>
+
+## Próxima unidad → [Deploy al Droplet con rollback en 1 minuto](./droplet-single-node-deploy/)

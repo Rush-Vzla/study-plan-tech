@@ -1,0 +1,167 @@
+---
+title: "docker-compose en el Droplet"
+description: "Orquesta todos los servicios de Rush en un único Droplet de DigitalOcean usando docker-compose con volúmenes, networks y health checks."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 3
+prerequisites: ['modulo-0/docker-basico', 'track-devops/docker-multistage-distroless']
+learning_outcomes:
+  - "Definir todos los servicios de Rush en un docker-compose.yml coherente"
+  - "Usar named volumes para persistir datos de Postgres y Redis"
+  - "Configurar health checks y dependencias entre servicios"
+  - "Entender por qué Rush usa un Droplet único en vez de orquestación compleja"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { docker: '27', node: '24' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Por qué un Droplet único y no algo más distribuido?**
+
+Rush está en etapa de MVP. Un Droplet único de DigitalOcean con 4vCPU/8GB RAM maneja cómodamente el tráfico inicial de decenas de negocios. La operabilidad importa más que la resiliencia multi-zona cuando el equipo es pequeño.
+
+Fíjate que la complejidad de Kubernetes o de múltiples nodos tiene un costo real: más configuración, más puntos de falla, más expertise necesario. Rush elige la simplicidad a propósito, y es una decisión técnica válida para este momento.
+
+**2. ¿Qué servicios corren en el Droplet?**
+
+El stack de Rush en producción incluye:
+
+- `api` — el backend NestJS compilado
+- `postgres` — base de datos principal
+- `redis` — cache y jobs de BullMQ
+- `caddy` — reverse proxy con TLS automático
+- `grafana`, `loki`, `prometheus` — observabilidad
+- `tempo` — tracing distribuido
+
+Todos en la misma máquina, coordinados por docker-compose.
+
+**3. ¿Para qué sirven los health checks?**
+
+Un health check le dice a Docker si un servicio está realmente listo para recibir tráfico, no solo si el proceso arrancó. Sin health checks, el `api` puede intentar conectarse a Postgres mientras Postgres todavía está inicializando. Con health checks y `depends_on: condition: service_healthy`, Docker espera a que Postgres esté listo antes de iniciar el `api`.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="docker-compose.yml del stack de Rush"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+Vamos a revisar las partes más importantes del docker-compose de Rush. El objetivo no es memorizarlo, sino entender cada decisión.
+
+### Networks y volúmenes
+
+```yaml
+networks:
+  rush_internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+  grafana_data:
+  loki_data:
+  prometheus_data:
+```
+
+Named volumes (con nombre) persisten en el host aunque el contenedor se borre. Eso es lo que quieres para Postgres: si haces `docker compose down` y luego `up`, los datos siguen ahí.
+
+### Postgres con health check
+
+```yaml
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rush_db
+      POSTGRES_USER: rush_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rush_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rush_user -d rush_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+```
+
+El `POSTGRES_PASSWORD_FILE` apunta a un Docker secret, no a una variable de entorno en texto plano. Esto es parte de la integración con Infisical que verás en la próxima unidad.
+
+### API dependiendo de Postgres y Redis
+
+```yaml
+  api:
+    image: ghcr.io/rush-vzla/rush-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rush_internal
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+```
+
+El `depends_on: condition: service_healthy` es la clave. Sin esto, el API intenta conectarse a Postgres antes de que esté listo, y tienes race conditions en el arranque.
+
+Nota que el `api` usa `expose` (accesible dentro de la network interna) y no `ports` (accesible desde el host). Caddy es el único servicio que publica puertos al exterior.
+
+### Caddy como entry point
+
+```yaml
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - rush_internal
+    depends_on:
+      api:
+        condition: service_healthy
+```
+
+Caddy es el único servicio con puertos públicos. Los demás están en la red interna del Droplet.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/docker-compose-droplet">
+
+- [ ] Puedo explicar la diferencia entre `ports` (público) y `expose` (interno) en docker-compose.
+- [ ] Entiendo para qué sirve un health check y por qué `depends_on: condition: service_healthy` es más confiable que `depends_on` simple.
+- [ ] Sé por qué Rush usa named volumes para Postgres y Redis.
+- [ ] Puedo describir qué servicios forman el stack de Rush y cuál es el único que expone puertos públicos.
+
+</Checkpoint>
+
+## Próxima unidad → [Caddy como reverse proxy](./caddy-reverse-proxy/)

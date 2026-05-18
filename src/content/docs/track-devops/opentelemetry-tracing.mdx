@@ -1,0 +1,197 @@
+---
+title: "OpenTelemetry y tracing"
+description: "Configura el SDK de OpenTelemetry en el backend de Rush, crea spans, exporta trazas a Tempo y entiende cuándo el tracing aporta sobre los logs."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 3
+prerequisites: ['track-devops/grafana-loki-prometheus']
+learning_outcomes:
+  - "Entender qué problema resuelve el tracing distribuido que los logs no resuelven"
+  - "Inicializar el SDK de OpenTelemetry en un servicio NestJS"
+  - "Crear spans manualmente para operaciones críticas"
+  - "Exportar trazas a Tempo y visualizarlas desde Grafana"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { node: '24', docker: '27' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Qué problema resuelve el tracing que los logs no pueden resolver?**
+
+Imagínate que un request de ventas tarda 800ms. Los logs te dicen que entró y que salió. Prometheus te dice que la latencia p99 subió. Pero ninguno de los dos te dice qué parte de ese request tardó esos 800ms.
+
+¿Fue el guard de autenticación? ¿La consulta a Postgres? ¿La llamada a Redis? ¿La serialización de la respuesta?
+
+El tracing responde exactamente eso. Cada operación dentro del request produce un **span** con su duración y atributos. El conjunto de spans de un request forma una **traza**, que puedes visualizar como un gráfico de Gantt.
+
+**2. ¿Qué es OpenTelemetry y por qué usarlo?**
+
+OpenTelemetry (OTel) es un estándar abierto para instrumentación de observabilidad. En vez de depender de la librería de tracing del vendor (Datadog, Jaeger, Zipkin), OTel te da un SDK neutral que puede exportar a cualquier backend.
+
+Rush usa OTel para exportar a **Grafana Tempo**, que es el backend de tracing OSS del stack de Grafana. Si en el futuro se cambia el backend, el código de instrumentación no cambia.
+
+**3. ¿Cuándo usar tracing y cuándo no?**
+
+Tracing tiene un costo: cada span agrega overhead de memoria y CPU, y genera datos que hay que almacenar. No instrumentes todo.
+
+Usa tracing para:
+
+- Operaciones de base de datos en rutas críticas de negocio.
+- Requests HTTP salientes a servicios externos.
+- Jobs de BullMQ que ejecutan lógica de negocio compleja.
+- Cualquier operación donde la latencia importa y no sabes dónde está el cuello de botella.
+
+No uses tracing para:
+
+- Operaciones triviales que tienen latencia despreciable.
+- Loops internos que crearían miles de spans por request.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Instrumentación de OpenTelemetry en el backend de Rush"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+### Instalar dependencias de OTel
+
+```bash
+pnpm add @opentelemetry/sdk-node \
+         @opentelemetry/auto-instrumentations-node \
+         @opentelemetry/exporter-trace-otlp-http \
+         @opentelemetry/resources \
+         @opentelemetry/semantic-conventions
+```
+
+### Configurar el SDK en el entry point
+
+La instrumentación debe inicializarse ANTES de que se cargue cualquier módulo de la aplicación. Por eso va en un archivo separado que se carga primero:
+
+```ts
+// src/instrumentation.ts
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { Resource } from '@opentelemetry/resources';
+import { SEMRESATTRS_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
+
+const sdk = new NodeSDK({
+  resource: new Resource({
+    [SEMRESATTRS_SERVICE_NAME]: 'rush-api',
+  }),
+  traceExporter: new OTLPTraceExporter({
+    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://tempo:4318/v1/traces',
+  }),
+  instrumentations: [
+    getNodeAutoInstrumentations({
+      '@opentelemetry/instrumentation-fs': { enabled: false },
+    }),
+  ],
+});
+
+sdk.start();
+
+process.on('SIGTERM', () => sdk.shutdown());
+```
+
+Se carga antes de main:
+
+```bash
+node --require ./dist/instrumentation.js dist/main.js
+```
+
+### Crear spans manualmente en un use case
+
+```ts
+// src/sales/application/create-sale.use-case.ts
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+
+const tracer = trace.getTracer('rush-api');
+
+export class CreateSaleUseCase {
+  async execute(input: CreateSaleInput): Promise<Sale> {
+    return tracer.startActiveSpan('CreateSaleUseCase.execute', async (span) => {
+      try {
+        span.setAttributes({
+          'sale.tenant_id': input.tenantId,
+          'sale.amount_usd': input.amountUsd,
+        });
+
+        const result = await this.salesRepo.create(input);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (err) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: String(err) });
+        span.recordException(err as Error);
+        throw err;
+      } finally {
+        span.end();
+      }
+    });
+  }
+}
+```
+
+El span hereda el contexto del span padre (el span del request HTTP creado por la auto-instrumentación).
+
+### Tempo en docker-compose
+
+```yaml
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    networks:
+      - rush_internal
+```
+
+```yaml
+# config/tempo.yaml
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo
+```
+
+### Agregar Tempo como data source en Grafana
+
+En Grafana, agrega el data source de Tempo apuntando a `http://tempo:3200`. Luego puedes explorar trazas en la sección Explore de Grafana y correlacionar con los logs de Loki.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/opentelemetry-tracing">
+
+- [ ] Puedo explicar qué pregunta responde el tracing que los logs no pueden responder.
+- [ ] Entiendo por qué el SDK de OTel debe inicializarse antes de cargar los módulos de la app.
+- [ ] Sé cómo crear un span manualmente con atributos, status y manejo de errores.
+- [ ] Puedo distinguir cuándo vale la pena instrumentar con tracing y cuándo no.
+
+</Checkpoint>
+
+## Próxima unidad → [Expand-contract en deploys](./expand-contract-deploy/)

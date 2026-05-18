@@ -1,0 +1,134 @@
+---
+title: "GitHub Container Registry"
+description: "Publica imágenes Docker a ghcr.io desde GitHub Actions y descárgalas en el Droplet con autenticación segura."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 2
+prerequisites: ['track-devops/docker-multistage-distroless', 'track-devops/github-actions-pipeline']
+learning_outcomes:
+  - "Entender por qué Rush usa ghcr.io en vez de Docker Hub u otros registries"
+  - "Autenticarse en ghcr.io desde GitHub Actions y desde el Droplet"
+  - "Publicar imágenes con tags de commit SHA para trazabilidad"
+  - "Configurar visibilidad y permisos de las imágenes en ghcr.io"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { docker: '27' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Por qué ghcr.io y no Docker Hub?**
+
+Docker Hub tiene límites de rate para pulls anónimos (100 pulls por 6 horas para IPs no autenticadas). En un pipeline de CI/CD que corre varias veces al día, eso puede bloquear el deploy en el momento menos oportuno.
+
+GitHub Container Registry (`ghcr.io`) está integrado con GitHub. Autenticarse con `GITHUB_TOKEN` no requiere credenciales adicionales y los límites son mucho más generosos. Además, la imagen queda asociada al repositorio que la produce, lo que hace el lineage trazable.
+
+**2. ¿Cómo funciona la autenticación en dos lugares?**
+
+El registry necesita autenticación en dos puntos distintos:
+
+- **En GitHub Actions** (para push): el runner se autentica con `GITHUB_TOKEN` al inicio del job de build-and-push.
+- **En el Droplet** (para pull): el Droplet necesita un token con permisos de lectura en el registry. En Rush, ese token es un Personal Access Token (PAT) con scope `read:packages`, guardado en Infisical.
+
+**3. ¿Por qué tagear con el SHA del commit?**
+
+Un tag `latest` siempre apunta a la imagen más reciente. Si hay un bug, `latest` ya apunta a la imagen buggy. Para revertir, necesitas saber cuál era la imagen anterior.
+
+Un tag con el SHA del commit (`sha-abc1234`) es inmutable. El deploy siempre puede referenciar exactamente qué imagen desplegó, y el rollback es tan simple como volver a desplegar el SHA anterior.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Publicar y consumir imágenes en ghcr.io"
+  estimatedMinutes={40}
+  runnable={false}
+>
+
+### Autenticación en GitHub Actions (push)
+
+```yaml
+- uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.actor }}
+    password: ${{ secrets.GITHUB_TOKEN }}
+```
+
+`github.actor` es el usuario o el bot que disparó el workflow. `GITHUB_TOKEN` es el token automático del runner — no necesitas crear nada.
+
+### Generar tags con docker/metadata-action
+
+```yaml
+- id: meta
+  uses: docker/metadata-action@v5
+  with:
+    images: ghcr.io/${{ github.repository }}
+    tags: |
+      type=sha,prefix=sha-
+      type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+```
+
+Esto genera dos tags:
+
+- `ghcr.io/rush-vzla/rush-api:sha-abc1234` — inmutable, identifica el commit.
+- `ghcr.io/rush-vzla/rush-api:latest` — conveniente para desarrollo.
+
+El `latest` solo se genera en pushes a `main`, no en branches de feature.
+
+### Visibilidad de la imagen en ghcr.io
+
+Por defecto, una imagen en ghcr.io hereda la visibilidad del repo: si el repo es privado, la imagen es privada. Para verificar o cambiar la visibilidad:
+
+```text
+GitHub > Settings del repo > Packages > rush-api > Package settings > Change visibility
+```
+
+En Rush, el backend es privado. La imagen también debe ser privada.
+
+### Autenticación en el Droplet (pull)
+
+En el Droplet, para que `docker compose pull` pueda descargar la imagen privada:
+
+```bash
+echo $GHCR_TOKEN | docker login ghcr.io -u rush-deploy --password-stdin
+```
+
+Esta línea corre una sola vez al configurar el Droplet. Las credenciales quedan en `~/.docker/config.json` del usuario de deploy. En Rush, `GHCR_TOKEN` es un PAT con scope `read:packages` guardado en Infisical.
+
+### Limpieza de imágenes antiguas
+
+Las imágenes se acumulan. GitHub tiene una acción oficial para limpiar versiones antiguas:
+
+```yaml
+- uses: actions/delete-package-versions@v5
+  with:
+    package-name: rush-api
+    package-type: container
+    min-versions-to-keep: 10
+    delete-only-untagged-versions: true
+```
+
+Esto mantiene las últimas 10 versiones tagueadas y borra las sin tag (que son las capas intermedias de builds fallidos).
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/ghcr-registry">
+
+- [ ] Sé por qué Rush usa ghcr.io en vez de Docker Hub para este stack.
+- [ ] Entiendo la diferencia entre autenticación para push (GitHub Actions) y pull (Droplet).
+- [ ] Puedo explicar por qué los tags con SHA de commit son mejor opción que solo `latest`.
+- [ ] Sé cómo configurar la visibilidad de una imagen y por qué la imagen de Rush debe ser privada.
+
+</Checkpoint>
+
+## Próxima unidad → [Grafana + Loki + Prometheus](./grafana-loki-prometheus/)

@@ -1,0 +1,169 @@
+---
+title: "Caddy como reverse proxy"
+description: "Configura Caddy 2 para manejar virtual hosts, HTTPS automático con Let's Encrypt y headers de seguridad."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 3
+prerequisites: ['track-devops/docker-compose-droplet']
+learning_outcomes:
+  - "Entender qué problema resuelve un reverse proxy en el stack de Rush"
+  - "Configurar virtual hosts y HTTPS automático en un Caddyfile"
+  - "Agregar headers de seguridad HTTP estándar sin configuración manual de certificados"
+  - "Comparar Caddy con Nginx para este caso de uso"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { caddy: '2' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Qué hace un reverse proxy y por qué Rush lo necesita?**
+
+El API de Rush corre en el puerto 3000 dentro de la red interna del Droplet. Para que el mundo exterior pueda accederlo en `https://app.tusitio.com`, necesitas algo que:
+
+1. Reciba tráfico en los puertos 80 y 443 (HTTP y HTTPS).
+2. Resuelva el certificado TLS.
+3. Reenvíe el request al servicio correcto según el dominio o la ruta.
+
+Eso es un reverse proxy. En Rush usamos Caddy 2 porque gestiona los certificados de Let's Encrypt automáticamente. No hay que renovarlos manualmente ni preocuparse por expiración.
+
+**2. ¿Cómo funciona el HTTPS automático de Caddy?**
+
+Caddy implementa el protocolo ACME de Let's Encrypt. Cuando arranca con un Caddyfile que tiene un dominio real (no `localhost`), Caddy:
+
+1. Hace un challenge HTTP-01 o TLS-ALPN-01 con los servidores de Let's Encrypt.
+2. Obtiene el certificado firmado.
+3. Lo guarda en el volumen `caddy_data/`.
+4. Lo renueva automáticamente 30 días antes del vencimiento.
+
+Todo eso sin configuración extra. Por eso usamos Caddy y no Nginx, que requiere Certbot como herramienta separada.
+
+**3. ¿Qué son los headers de seguridad y por qué importan?**
+
+Los headers de seguridad HTTP son instrucciones que el servidor le envía al browser para limitar qué puede hacer la página cargada. Algunos ejemplos:
+
+- `Strict-Transport-Security`: le dice al browser que siempre use HTTPS para este dominio, nunca HTTP.
+- `X-Frame-Options`: evita que tu app se cargue dentro de un `<iframe>` en otro sitio (clickjacking).
+- `X-Content-Type-Options`: evita que el browser "adivine" el MIME type de una respuesta.
+- `Referrer-Policy`: controla qué información se envía en el header `Referer`.
+
+Caddy te deja agregarlos con un solo bloque de configuración.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Caddyfile para el stack de Rush"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+Un Caddyfile es la configuración de Caddy. Su sintaxis es declarativa y mucho más concisa que la de Nginx.
+
+### Virtual host básico con HTTPS automático
+
+```text
+api.example.com {
+    reverse_proxy api:3000
+}
+```
+
+Eso es todo lo que necesitas para tener HTTPS automático con Let's Encrypt y proxy al contenedor `api` en el puerto 3000. Caddy resuelve el certificado sin configuración adicional.
+
+### Redireccionamiento HTTP a HTTPS
+
+Caddy lo hace automáticamente. Si alguien accede a `http://api.example.com`, Caddy redirige a `https://api.example.com` sin que tengas que declararlo.
+
+### Headers de seguridad
+
+```text
+api.example.com {
+    reverse_proxy api:3000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
+```
+
+El `-Server` elimina el header `Server` de la respuesta, que por defecto muestra la versión de Caddy. No es un secreto que rescata, pero sí reduce la información que un atacante puede inferir del servidor.
+
+### Múltiples servicios en el mismo Droplet
+
+```text
+api.example.com {
+    reverse_proxy api:3000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+}
+
+grafana.example.com {
+    reverse_proxy grafana:3000
+
+    basicauth {
+        admin JDJhJDE0JG...
+    }
+}
+```
+
+Cada virtual host es un bloque separado. Caddy gestiona un certificado TLS distinto por cada dominio.
+
+### Caddyfile completo con logging
+
+```text
+{
+    email ops@example.com
+    log {
+        output stdout
+        format json
+    }
+}
+
+api.example.com {
+    reverse_proxy api:3000 {
+        health_uri /health
+        health_interval 10s
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
+```
+
+El bloque `health_uri` le dice a Caddy que verifique la salud del upstream antes de enrutarle tráfico.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/caddy-reverse-proxy">
+
+- [ ] Sé explicar qué hace un reverse proxy y por qué el API de Rush no expone su puerto directamente al exterior.
+- [ ] Entiendo por qué Caddy gestiona el certificado TLS automáticamente y qué protocolo usa para obtenerlo.
+- [ ] Puedo escribir un bloque básico de Caddyfile con un virtual host y headers de seguridad.
+- [ ] Sé por qué Rush eligió Caddy sobre Nginx para este caso de uso.
+
+</Checkpoint>
+
+## Próxima unidad → [Cloudflare: DNS, CDN y WAF](./cloudflare-setup/)

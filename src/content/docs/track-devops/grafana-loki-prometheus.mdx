@@ -1,0 +1,230 @@
+---
+title: "Grafana + Loki + Prometheus"
+description: "Implementa el stack de observabilidad OSS de Rush: logs estructurados con Pino hacia Loki, métricas con prom-client hacia Prometheus, dashboards en Grafana."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 5
+prerequisites: ['modulo-0/observabilidad-concepto', 'track-devops/docker-compose-droplet']
+learning_outcomes:
+  - "Distinguir logs, métricas y trazas, y saber cuándo usar cada uno"
+  - "Configurar el backend de NestJS para enviar logs JSON a Loki"
+  - "Exponer métricas de prom-client en un endpoint /metrics para Prometheus"
+  - "Crear un dashboard básico en Grafana para logs y métricas"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { node: '24', docker: '27' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Cuál es la diferencia entre logs, métricas y trazas?**
+
+Fíjate que estas tres herramientas responden preguntas distintas:
+
+- **Logs**: qué pasó exactamente y en qué orden. "El request del business `abc-123` llegó a las 14:03:22 y falló con error 500 en el módulo de ventas."
+- **Métricas**: cuánto pasa con qué frecuencia. "El endpoint `/sales` procesa 1200 requests por minuto con latencia p99 de 340ms."
+- **Trazas**: cuánto tardó cada parte de una operación compuesta. "El request tardó 340ms en total: 10ms en el guard, 5ms parsando, 320ms esperando a Postgres, 5ms serializando."
+
+En Rush usamos las tres porque responden preguntas distintas y no son substituibles entre sí.
+
+**2. ¿Cómo llegan los logs de Pino a Loki?**
+
+Pino escribe logs JSON al stdout. El Docker logging driver los recoge. Promtail (el agente de Loki) lee el stdout de los contenedores de Docker y los envía a Loki con labels que identifican el servicio.
+
+En Grafana puedes buscar esos logs con LogQL: el lenguaje de consulta de Loki.
+
+**3. ¿Cómo funciona prom-client y el scraping de Prometheus?**
+
+`prom-client` es la librería de Node.js que expone métricas en formato Prometheus. El backend de Rush registra contadores, histogramas y gauges, y los sirve en el endpoint `GET /metrics`.
+
+Prometheus hace scraping de ese endpoint periódicamente (cada 15s por defecto) y guarda los valores en su base de datos de series de tiempo. Grafana consulta Prometheus para visualizarlos.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Stack de observabilidad de Rush: Pino, prom-client, Grafana"
+  estimatedMinutes={100}
+  runnable={false}
+>
+
+### Configurar Pino en NestJS
+
+Instalar las dependencias:
+
+```bash
+pnpm add pino nestjs-pino pino-http
+pnpm add -D pino-pretty
+```
+
+Configurar en el módulo principal:
+
+```ts
+// src/app.module.ts
+import { LoggerModule } from 'nestjs-pino';
+
+@Module({
+  imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        transport:
+          process.env.NODE_ENV === 'production'
+            ? undefined
+            : { target: 'pino-pretty' },
+        redact: ['req.headers.authorization', 'body.password'],
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+El `redact` es crítico: nunca loggees el header de autorización ni contraseñas. Pino los reemplaza con `[Redacted]`.
+
+### Loki y Promtail en docker-compose
+
+```yaml
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ./config/loki.yaml:/etc/loki/local-config.yaml:ro
+    networks:
+      - rush_internal
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    restart: unless-stopped
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/promtail.yaml:/etc/promtail/config.yaml:ro
+    networks:
+      - rush_internal
+```
+
+Promtail necesita acceso al socket de Docker para leer logs de los contenedores.
+
+### Configuración de Promtail para el API de Rush
+
+```yaml
+# config/promtail.yaml
+server:
+  http_listen_port: 9080
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+```
+
+### Exponer métricas con prom-client
+
+```bash
+pnpm add prom-client
+```
+
+```ts
+// src/metrics/metrics.module.ts
+import { Module } from '@nestjs/common';
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+
+@Module({
+  imports: [
+    PrometheusModule.register({
+      path: '/metrics',
+      defaultMetrics: { enabled: true },
+    }),
+  ],
+})
+export class MetricsModule {}
+```
+
+El endpoint `/metrics` devuelve las métricas en formato texto que Prometheus entiende. Incluye métricas por defecto del proceso de Node: uso de memoria, event loop lag, descriptores de archivos abiertos.
+
+### Prometheus en docker-compose
+
+```yaml
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - rush_internal
+```
+
+```yaml
+# config/prometheus.yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: rush-api
+    static_configs:
+      - targets: ['api:3000']
+    metrics_path: /metrics
+```
+
+### Grafana con data sources preconfigurados
+
+```yaml
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - rush_internal
+```
+
+Los data sources se pueden provisionar desde archivos YAML para que estén listos al arrancar Grafana:
+
+```yaml
+# config/grafana/datasources/datasources.yaml
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+  - name: Loki
+    type: loki
+    url: http://loki:3100
+```
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/grafana-loki-prometheus">
+
+- [ ] Puedo explicar la diferencia entre logs, métricas y trazas con un ejemplo concreto.
+- [ ] Entiendo cómo Pino escribe al stdout, Promtail lo recoge y Loki lo almacena.
+- [ ] Sé para qué sirve `redact` en la configuración de Pino y qué datos deben redactarse.
+- [ ] Puedo describir el ciclo de scraping de Prometheus: endpoint `/metrics` → scraping → visualización en Grafana.
+
+</Checkpoint>
+
+## Próxima unidad → [OpenTelemetry y tracing](./opentelemetry-tracing/)

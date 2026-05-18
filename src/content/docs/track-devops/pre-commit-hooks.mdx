@@ -1,0 +1,136 @@
+---
+title: "Pre-commit hooks con gitleaks"
+description: "Configura simple-git-hooks y lint-staged para ejecutar formato, lint y escaneo de secretos antes de cada commit."
+unit_type: lectura-lab-checkpoint
+track: 'track-devops'
+estimated_hours: 2
+prerequisites: ['modulo-0/git-workflow', 'track-devops/infisical-secrets']
+learning_outcomes:
+  - "Entender por qué los hooks de pre-commit son una red de seguridad local"
+  - "Configurar simple-git-hooks con lint-staged para Prettier y ESLint"
+  - "Agregar gitleaks como scanner de secretos en el pre-commit"
+  - "Saber cuándo desactivar un hook temporalmente y cómo documentarlo"
+tags: ['obligatorio', 'track-devops']
+last_updated: '2026-05-18'
+stack_versions: { node: '24' }
+lab_runnable: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+**1. ¿Para qué sirven los pre-commit hooks?**
+
+Un pre-commit hook es un script que Git corre automáticamente antes de crear el commit. Si el script falla, el commit no se crea.
+
+Esto te da una red de seguridad local: el código formateado, lintado y sin secretos llega al repositorio desde el principio, antes de que el CI lo detecte. Es mucho más barato arreglar un problema local que arreglarlo en una PR abierta.
+
+Acá está el punto: los hooks no reemplazan al CI. El CI es la validación autoritativa. Los hooks son una conveniencia para el desarrollador.
+
+**2. ¿Por qué `simple-git-hooks` y no Husky?**
+
+Husky es más conocido, pero tiene más configuración y cambia cada versión mayor. `simple-git-hooks` es una alternativa minimalista: define tus hooks en `package.json` y listo. No tiene dependencias transitivas complicadas.
+
+**3. ¿Qué es gitleaks y qué detecta?**
+
+Gitleaks es una herramienta de escaneo de secretos. Revisa los archivos que vas a commitear buscando patrones que se parecen a credenciales: tokens de API, claves de AWS, cadenas de conexión de base de datos, claves privadas RSA.
+
+Si detecta un match, bloquea el commit y te muestra qué encontró y en qué archivo. Eso te da la oportunidad de rotar el secreto antes de que llegue al historial de Git.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Configurar simple-git-hooks + lint-staged + gitleaks en el repo de Rush"
+  estimatedMinutes={40}
+  runnable={false}
+>
+
+### Instalar las dependencias
+
+```bash
+pnpm add -D simple-git-hooks lint-staged
+```
+
+Gitleaks se instala como binario del sistema, no como dependencia de npm:
+
+```bash
+# macOS
+brew install gitleaks
+
+# Linux (CI o Droplet)
+curl -Lo gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+tar -xzf gitleaks.tar.gz gitleaks
+sudo mv gitleaks /usr/local/bin/
+```
+
+### Configurar en package.json
+
+```json
+{
+  "simple-git-hooks": {
+    "pre-commit": "pnpm lint-staged && gitleaks protect --staged --redact"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["prettier --write", "eslint --fix"],
+    "*.{json,yaml,yml,md}": ["prettier --write"]
+  }
+}
+```
+
+El `--staged` le dice a gitleaks que solo revise los archivos en el staging area, no el historial completo. El `--redact` reemplaza los secretos detectados en el output por `REDACTED` para que no aparezcan en los logs del terminal.
+
+### Activar los hooks
+
+```bash
+pnpm simple-git-hooks
+```
+
+Esto escribe los scripts en `.git/hooks/pre-commit`. Cada vez que alguien hace `pnpm install`, `simple-git-hooks` reinstala los hooks automáticamente si están en `postinstall`.
+
+### Agregar al package.json scripts
+
+```json
+{
+  "scripts": {
+    "postinstall": "simple-git-hooks"
+  }
+}
+```
+
+Así cualquier dev que clone el repo y haga `pnpm install` tiene los hooks configurados sin pasos manuales.
+
+### Archivo .gitleaks.toml para excepciones
+
+```toml
+[allowlist]
+  description = "Known safe patterns in this repo"
+  paths = [
+    "docs-internal/style-guide-maracucho.md",
+  ]
+  regexes = [
+    "example\\.com"
+  ]
+```
+
+Si gitleaks detecta falsos positivos, los documenta en `.gitleaks.toml`. Cada excepción debe tener una descripción que justifique por qué no es un secreto real.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="track-devops/pre-commit-hooks">
+
+- [ ] Sé explicar para qué sirven los pre-commit hooks y por qué no reemplazan al CI.
+- [ ] Entiendo la diferencia entre `simple-git-hooks` y Husky, y por qué Rush eligió el primero.
+- [ ] Puedo configurar `lint-staged` para correr Prettier y ESLint solo en los archivos modificados.
+- [ ] Sé qué hace gitleaks, cuándo bloquea un commit y cómo documentar una excepción en `.gitleaks.toml`.
+
+</Checkpoint>
+
+## Próxima unidad → [Changesets y shared-schemas](./changesets-shared-schemas/)
