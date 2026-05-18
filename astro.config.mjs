@@ -14,9 +14,9 @@ export default defineConfig({
       title: 'Plan B — Rush Técnico',
       description:
         'Plan de estudio técnico para devs que se suman al equipo Rush. Módulo 0 + 3 tracks (Backend, Frontend, DevOps).',
-      defaultLocale: 'es',
+      defaultLocale: 'root',
       locales: {
-        es: { label: 'Español (Venezuela)', lang: 'es-VE' },
+        root: { label: 'Español (Venezuela)', lang: 'es-VE' },
       },
       social: [],
       editLink: {
@@ -46,25 +46,19 @@ export default defineConfig({
           label: 'Track Backend',
           badge: { text: 'BE', variant: 'note' },
           collapsed: true,
-          items: [{ autogenerate: { directory: 'track-be', collapsed: true } }],
+          items: [{ autogenerate: { directory: 'track-be' } }],
         },
         {
           label: 'Track Frontend',
           badge: { text: 'FE', variant: 'note' },
           collapsed: true,
-          items: [{ autogenerate: { directory: 'track-fe', collapsed: true } }],
+          items: [{ autogenerate: { directory: 'track-fe' } }],
         },
         {
           label: 'Track DevOps',
           badge: { text: 'DevOps', variant: 'note' },
           collapsed: true,
-          items: [{ autogenerate: { directory: 'track-devops', collapsed: true } }],
-        },
-        {
-          label: 'Más allá de Rush (extra)',
-          badge: { text: 'opcional', variant: 'caution' },
-          collapsed: true,
-          items: [{ autogenerate: { directory: 'extra', collapsed: true } }],
+          items: [{ autogenerate: { directory: 'track-devops' } }],
         },
       ],
     }),

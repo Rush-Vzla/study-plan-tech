@@ -66,4 +66,4 @@ Este track enseña el stack real de Rush. No cubre:
 - Multi-región o alta disponibilidad — Rush prioriza simplicidad operacional sobre resiliencia multi-zona.
 - Configuraciones de producción reales: IPs, dominios, credenciales. Los ejemplos son ilustrativos.
 
-## Próxima unidad → [Docker multi-stage con imagen distroless](./docker-multistage-distroless/)
+## Próxima unidad → [Docker multi-stage con imagen distroless](../docker-multistage-distroless/)

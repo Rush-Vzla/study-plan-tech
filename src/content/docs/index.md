@@ -55,4 +55,4 @@ No hay un cronograma fijo. Cada dev avanza a su ritmo. Lo único que importa es 
 
 ## ¿Por dónde empiezo?
 
-→ [Cómo usar este plan](/meta/como-usar-este-plan/)
+→ [Cómo usar este plan](/_meta/como-usar-este-plan/)
