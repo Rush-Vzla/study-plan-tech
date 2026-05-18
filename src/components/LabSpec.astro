@@ -1,0 +1,66 @@
+---
+interface Props {
+  title: string;
+  estimatedMinutes: number;
+  labPath?: string;
+  runnable?: boolean;
+}
+const { title, estimatedMinutes, labPath, runnable = false } = Astro.props;
+---
+
+<aside class="lab-spec">
+  <header class="lab-spec__header">
+    <span class="lab-spec__icon" aria-hidden="true">▶</span>
+    <h3 class="lab-spec__title">Lab: {title}</h3>
+    <span class="lab-spec__time">~{estimatedMinutes} min</span>
+  </header>
+  {
+    labPath && (
+      <p class="lab-spec__path">
+        Código del lab: <code>{labPath}</code>
+        {runnable && <span class="lab-spec__badge">ejecutable</span>}
+      </p>
+    )
+  }
+  <div class="lab-spec__body">
+    <slot />
+  </div>
+</aside>
+
+<style>
+  .lab-spec {
+    border: 1px solid var(--sl-color-accent-low);
+    border-left: 4px solid var(--sl-color-accent);
+    background: color-mix(in srgb, var(--sl-color-accent) 6%, transparent);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    border-radius: 6px;
+  }
+  .lab-spec__header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .lab-spec__title {
+    margin: 0;
+    font-size: 1.125rem;
+  }
+  .lab-spec__time {
+    margin-left: auto;
+    font-size: 0.875rem;
+    color: var(--sl-color-gray-3);
+  }
+  .lab-spec__path {
+    font-size: 0.875rem;
+    margin: 0.5rem 0 1rem;
+  }
+  .lab-spec__badge {
+    margin-left: 0.5rem;
+    background: var(--sl-color-accent);
+    color: var(--sl-color-black);
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+  }
+</style>

@@ -1,0 +1,37 @@
+---
+type Track = 'modulo-0' | 'track-be' | 'track-fe' | 'track-devops';
+
+interface Props {
+  track: Track;
+}
+
+const { track } = Astro.props;
+
+const trackConfig: Record<Track, { label: string; color: string }> = {
+  'modulo-0': { label: 'Módulo 0', color: '#2ecc71' },
+  'track-be': { label: 'Backend', color: '#3498db' },
+  'track-fe': { label: 'Frontend', color: '#9b59b6' },
+  'track-devops': { label: 'DevOps', color: '#e67e22' },
+};
+
+const config = trackConfig[track];
+---
+
+<span class="track-badge" style={`--badge-color: ${config.color}`}>
+  {config.label}
+</span>
+
+<style>
+  .track-badge {
+    display: inline-block;
+    background: color-mix(in srgb, var(--badge-color) 15%, transparent);
+    color: var(--badge-color);
+    border: 1px solid color-mix(in srgb, var(--badge-color) 40%, transparent);
+    padding: 0.125rem 0.625rem;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+  }
+</style>

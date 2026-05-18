@@ -1,0 +1,72 @@
+---
+interface Props {
+  items: string[];
+}
+
+const { items } = Astro.props;
+
+/**
+ * Converts a content slug like "modulo-0/ts-estricto" to a URL path like "/modulo-0/ts-estricto/".
+ */
+function slugToPath(slug: string): string {
+  return `/${slug}/`;
+}
+
+/**
+ * Converts a slug like "modulo-0/ts-estricto" to a readable label like "ts-estricto".
+ */
+function slugToLabel(slug: string): string {
+  const parts = slug.split('/');
+  return parts[parts.length - 1] ?? slug;
+}
+---
+
+{
+  items.length > 0 ? (
+    <ul class="prereq-list">
+      {items.map((slug) => (
+        <li class="prereq-list__item">
+          <a href={slugToPath(slug)} class="prereq-list__link">
+            {slugToLabel(slug)}
+          </a>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p class="prereq-list__empty">Sin prerequisitos — esta es una unidad de entrada.</p>
+  )
+}
+
+<style>
+  .prereq-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .prereq-list__item {
+    margin: 0;
+  }
+  .prereq-list__link {
+    display: inline-block;
+    background: color-mix(in srgb, var(--sl-color-accent) 10%, transparent);
+    border: 1px solid var(--sl-color-accent-low);
+    color: var(--sl-color-accent-high);
+    padding: 0.125rem 0.625rem;
+    border-radius: 4px;
+    font-size: 0.8125rem;
+    text-decoration: none;
+    transition: background 0.15s ease;
+  }
+  .prereq-list__link:hover {
+    background: color-mix(in srgb, var(--sl-color-accent) 20%, transparent);
+  }
+  .prereq-list__empty {
+    font-size: 0.875rem;
+    color: var(--sl-color-gray-3);
+    font-style: italic;
+    margin: 0;
+  }
+</style>

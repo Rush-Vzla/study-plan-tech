@@ -1,0 +1,37 @@
+{
+  "name": "study-plan-tech",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "lint:md": "markdownlint-cli2 \"src/content/docs/**/*.{md,mdx}\"",
+    "lint:md:fix": "markdownlint-cli2 --fix \"src/content/docs/**/*.{md,mdx}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,astro,md,mdx,json}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,astro,md,mdx,json}\""
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.39.2",
+    "@tailwindcss/vite": "^4.3.0",
+    "astro": "^6.3.1",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.3.0",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "packageManager": "pnpm@11.1.2",
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@astrojs/starlight-tailwind": "^5.0.0",
+    "markdownlint-cli2": "^0.22.1",
+    "prettier": "^3.8.3",
+    "prettier-plugin-astro": "^0.14.1",
+    "typescript": "^6.0.3"
+  }
+}

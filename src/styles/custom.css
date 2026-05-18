@@ -1,0 +1,54 @@
+/* Rush — custom CSS overrides for Starlight */
+
+:root {
+  /* Paleta Rush */
+  --sl-color-accent-low: #1b3a2a;
+  --sl-color-accent: #2ecc71;
+  --sl-color-accent-high: #b8f5d0;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eef1ef;
+  --sl-color-gray-2: #c0c2c1;
+  --sl-color-gray-3: #888a89;
+  --sl-color-gray-4: #545756;
+  --sl-color-gray-5: #353837;
+  --sl-color-gray-6: #232726;
+  --sl-color-black: #17181c;
+}
+
+/* Light mode override */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #c9f0d8;
+  --sl-color-accent: #199850;
+  --sl-color-accent-high: #0e5c2e;
+}
+
+/* Unidades extra — banner + border lateral */
+article.unit-extra {
+  border-left: 4px solid #f5a623;
+  padding-left: 1.25rem;
+}
+
+article.unit-extra::before {
+  content: 'Esta unidad es opcional — Más allá de lo que Rush usa hoy.';
+  display: block;
+  background: rgba(245, 166, 35, 0.12);
+  color: var(--sl-color-text);
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+  font-weight: 500;
+}
+
+/* Tipografia */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Code blocks */
+.sl-markdown-content pre code {
+  line-height: 1.5;
+}
