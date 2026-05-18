@@ -1,6 +1,11 @@
 ---
 title: "Track DevOps — Más allá de Rush"
 description: "Tres unidades opcionales para ir más allá del stack que Rush usa hoy: Kubernetes, Terraform e GitHub Actions avanzado."
+sidebar:
+  order: 999
+  badge:
+    text: 'extra'
+    variant: caution
 unit_type: indice
 track: 'track-devops'
 estimated_hours: 10
@@ -13,11 +18,6 @@ last_updated: '2026-05-18'
 stack_versions: {}
 lab_runnable: false
 extra: true
-sidebar:
-  order: 100
-  badge:
-    text: 'extra'
-    variant: caution
 ---
 
 ## ¿Qué son estas unidades?

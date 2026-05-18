@@ -2,7 +2,7 @@
 title: "Track Frontend — Más allá de Rush"
 description: Cuatro unidades opcionales para profundizar en patrones avanzados de React y arquitectura frontend que van más allá del stack actual de Rush.
 sidebar:
-  order: 0
+  order: 999
   badge:
     text: 'extra'
     variant: caution

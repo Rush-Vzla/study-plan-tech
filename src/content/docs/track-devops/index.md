@@ -4,6 +4,8 @@ description: "Aprende a desplegar, operar y monitorear el stack de Rush sobre un
 unit_type: indice
 track: 'track-devops'
 estimated_hours: 42
+sidebar:
+  order: 0
 tags: ['obligatorio', 'track-devops']
 last_updated: '2026-05-18'
 ---

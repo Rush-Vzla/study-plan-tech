@@ -2,14 +2,19 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
+import mermaid from 'astro-mermaid';
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://study-plan-tech.pages.dev',
+  site: 'https://studyplantech.vercel.app',
   vite: {
     plugins: [tailwindcss()],
   },
   integrations: [
+    mermaid({
+      theme: 'dark',
+      autoTheme: true,
+    }),
     starlight({
       title: 'Plan B — Rush Técnico',
       description:
@@ -20,7 +25,7 @@ export default defineConfig({
       },
       social: [],
       editLink: {
-        baseUrl: 'https://github.com/Rush-Vzla/study-plan-tech/edit/master/',
+        baseUrl: 'https://github.com/Rush-Vzla/study-plan-tech/edit/main/',
       },
       lastUpdated: true,
       pagination: true,
