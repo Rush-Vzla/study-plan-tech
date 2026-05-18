@@ -33,6 +33,17 @@ Fíjate que estas tres herramientas responden preguntas distintas:
 
 En Rush usamos las tres porque responden preguntas distintas y no son substituibles entre sí.
 
+```mermaid
+graph TD
+  API[NestJS API] -->|stdout JSON| PROMTAIL[Promtail]
+  API -->|GET /metrics| PROMETHEUS[Prometheus]
+  API -->|OTLP traces| TEMPO[Grafana Tempo]
+  PROMTAIL -->|push logs| LOKI[Loki]
+  LOKI --> GRAFANA[Grafana\ndashboards]
+  PROMETHEUS --> GRAFANA
+  TEMPO --> GRAFANA
+```
+
 **2. ¿Cómo llegan los logs de Pino a Loki?**
 
 Pino escribe logs JSON al stdout. El Docker logging driver los recoge. Promtail (el agente de Loki) lee el stdout de los contenedores de Docker y los envía a Loki con labels que identifican el servicio.

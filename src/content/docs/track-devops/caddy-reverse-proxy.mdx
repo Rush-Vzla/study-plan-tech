@@ -33,6 +33,12 @@ El API de Rush corre en el puerto 3000 dentro de la red interna del Droplet. Par
 
 Eso es un reverse proxy. En Rush usamos Caddy 2 porque gestiona los certificados de Let's Encrypt automáticamente. No hay que renovarlos manualmente ni preocuparse por expiración.
 
+```mermaid
+graph LR
+  Client[Usuario] -->|HTTPS :443| CADDY[Caddy\nTLS automático\nheaders de seguridad]
+  CADDY -->|HTTP interno| API[api:3000\nNestJS]
+```
+
 **2. ¿Cómo funciona el HTTPS automático de Caddy?**
 
 Caddy implementa el protocolo ACME de Let's Encrypt. Cuando arranca con un Caddyfile que tiene un dominio real (no `localhost`), Caddy:

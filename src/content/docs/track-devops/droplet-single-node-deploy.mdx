@@ -35,6 +35,19 @@ El ciclo completo de un deploy en Rush es:
 6. Si el health check pasa: deploy exitoso.
 7. Si el health check falla: rollback inmediato.
 
+```mermaid
+sequenceDiagram
+  participant CI as GitHub Actions
+  participant GHCR as ghcr.io
+  participant DROPLET as Droplet
+  CI->>GHCR: push imagen con tag SHA
+  CI->>DROPLET: SSH: docker compose pull api
+  DROPLET->>GHCR: descarga imagen nueva
+  CI->>DROPLET: SSH: docker compose up -d api
+  DROPLET-->>CI: health check OK / FAIL
+  CI->>DROPLET: si FAIL: docker compose up -d api (tag anterior)
+```
+
 Entre el paso 4 y el 5, docker-compose tiene configurado un health check con retries y un período de gracia. El servicio viejo sigue corriendo hasta que el nuevo esté healthy.
 
 **2. ¿Cómo funciona el rollback en Rush?**

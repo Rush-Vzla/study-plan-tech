@@ -119,6 +119,15 @@ export class IdempotencyService {
 }
 ```
 
+```mermaid
+flowchart TD
+  REQ[Request con Idempotency-Key] --> CHECK{Key existe\ny no expiró?}
+  CHECK -- Sí --> RETURN[Retornar\nrespuesta cacheada]
+  CHECK -- No --> EXEC[Ejecutar operación]
+  EXEC --> STORE[Guardar resultado\ncon TTL 48h]
+  STORE --> RETURN2[Retornar\nresultado nuevo]
+```
+
 ### El header Idempotency-Key
 
 El cliente envía el header `Idempotency-Key` con un UUID único por cada intento lógico de operación. Si reintenta, envía el mismo UUID. El backend devuelve la misma respuesta sin procesar el request de nuevo.

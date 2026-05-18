@@ -40,6 +40,13 @@ El patrón expand-contract resuelve eso: en vez de un cambio destructivo, haces 
 
 **Fase 3 — Contract**: elimina la columna vieja. En este punto, el código ya no la usa.
 
+```mermaid
+graph LR
+  EXPAND[Deploy 1\nExpand\nAgrega columna nueva\nEscribe en ambas] --> MIGRATE[Deploy 2\nMigrate\nCopia datos\nVerifica integridad]
+  MIGRATE --> CONTRACT[Deploy 3\nContract\nElimina columna vieja]
+  CONTRACT --> DONE[Schema limpio\nsin downtime]
+```
+
 Ejemplo concreto: quieres renombrar `sales_events.amount` a `sales_events.amount_original`.
 
 ```text

@@ -76,6 +76,17 @@ const queryClient = new QueryClient({
 });
 ```
 
+```mermaid
+stateDiagram-v2
+  [*] --> fresh: query exitosa
+  fresh --> stale: pasa staleTime
+  stale --> fetching: componente activo solicita refetch
+  fetching --> fresh: success
+  fetching --> stale: error (mantiene datos anteriores)
+  stale --> inactive: ningún componente suscrito
+  inactive --> [*]: pasa gcTime
+```
+
 ### Invalidación después de una mutación
 
 Cuando el usuario registra una venta, el cache de ventas queda stale inmediatamente. TanStack Query tiene un mecanismo explícito para esto:

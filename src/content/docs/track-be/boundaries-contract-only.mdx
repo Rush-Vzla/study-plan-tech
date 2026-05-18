@@ -52,6 +52,13 @@ export const BILLING_PORT = Symbol('BillingPort');
 
 El dominio llama a `BillingPort`. No sabe si el billing está activo o no.
 
+```mermaid
+graph LR
+  Domain[Dominio\nSalesService] -->|usa| Port[BillingPort\ninterfaz]
+  Port -->|implementa| NoOp[NoOpBillingAdapter\nMVP]
+  Port -->|implementa| Real[RealBillingAdapter\ncuando esté listo]
+```
+
 ### El NoOp adapter
 
 ```ts

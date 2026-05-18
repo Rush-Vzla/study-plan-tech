@@ -36,14 +36,14 @@ Fíjate que esto puede cambiar. Si TanStack Router publica un patch verificado y
 
 React Router v7 usa el mismo modelo que Remix: rutas como archivos o como configuración declarativa. Rush usa configuración declarativa (más controlable en proyectos con auth guards).
 
-```text
-/ (layout raíz con navbar)
-├── /login         (pública)
-├── /app           (protegida — requiere auth)
-│   ├── /app/sales
-│   ├── /app/inventory
-│   └── /app/settings
-└── /*             (404)
+```mermaid
+graph TD
+  ROOT[/ layout raíz] --> LOGIN[/login pública]
+  ROOT --> APP[/app protegida\nAuthGuard]
+  APP --> SALES[/app/sales]
+  APP --> INVENTORY[/app/inventory]
+  APP --> SETTINGS[/app/settings]
+  ROOT --> NOTFOUND[/* 404]
 ```
 
 ### Loaders: datos antes de renderizar

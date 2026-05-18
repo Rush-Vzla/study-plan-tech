@@ -32,6 +32,12 @@ En un sistema append-only, cuando hay un error — una venta registrada por el m
 
 Fíjate en la diferencia con un DELETE: con DELETE pierdes la evidencia de que algo pasó. Con un compensating event, el historial queda completo — el evento original, el error, y la corrección. Eso es vital en un sistema financiero.
 
+```mermaid
+graph LR
+  E1[Evento original\nventa $500 USD] --> E2[Compensating event\n-$500 USD\nreverses_event_id = E1]
+  E2 --> NET[Neto = $0\nHistorial completo]
+```
+
 ### El campo reverses_event_id
 
 El evento compensador lleva dos cosas especiales:

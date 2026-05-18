@@ -29,6 +29,17 @@ Un pipeline monolítico de un solo job tiene un problema: si falla el test, igua
 
 Además, los jobs pueden correr en paralelo cuando no tienen dependencias. Por ejemplo: linting y tests pueden correr al mismo tiempo. El build de la imagen solo corre si ambos pasan.
 
+```mermaid
+graph LR
+  PUSH[Push a main] --> LINT[lint + typecheck]
+  PUSH --> TEST[pnpm test]
+  LINT --> BUILD[docker build\nmulti-stage]
+  TEST --> BUILD
+  BUILD --> SCAN[Trivy scan]
+  SCAN --> PUSH_IMG[Push a ghcr.io]
+  PUSH_IMG --> DEPLOY[SSH deploy\nal Droplet]
+```
+
 **2. ¿Qué es `GITHUB_TOKEN` y por qué es suficiente para publicar en ghcr.io?**
 
 GitHub Actions tiene una variable `GITHUB_TOKEN` que se genera automáticamente para cada ejecución del workflow. Este token tiene permisos sobre el repositorio actual. Para publicar imágenes en ghcr.io, basta con autenticarse con ese token — no necesitas crear un Personal Access Token adicional.

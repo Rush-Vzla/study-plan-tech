@@ -42,6 +42,17 @@ El stack de Rush en producción incluye:
 
 Todos en la misma máquina, coordinados por docker-compose.
 
+```mermaid
+graph TD
+  CADDY[caddy\nreverse proxy TLS] --> API[api\nNestJS]
+  API --> POSTGRES[(postgres)]
+  API --> REDIS[(redis\ncache + BullMQ)]
+  API --> GRAFANA[grafana\ndashboards]
+  GRAFANA --> LOKI[loki\nlogs]
+  GRAFANA --> PROMETHEUS[prometheus\nmétricas]
+  GRAFANA --> TEMPO[tempo\ntracing]
+```
+
 **3. ¿Para qué sirven los health checks?**
 
 Un health check le dice a Docker si un servicio está realmente listo para recibir tráfico, no solo si el proceso arrancó. Sin health checks, el `api` puede intentar conectarse a Postgres mientras Postgres todavía está inicializando. Con health checks y `depends_on: condition: service_healthy`, Docker espera a que Postgres esté listo antes de iniciar el `api`.

@@ -51,6 +51,13 @@ CREATE TABLE sales_events (
 
 Cada venta es un `INSERT`. Nunca hay `UPDATE` ni `DELETE` en esta tabla. Si hay un error, se registra un evento compensador (lo verás en la próxima unidad).
 
+```mermaid
+graph LR
+  E1[INSERT\nventa $150] --> E2[INSERT\nventa $200]
+  E2 --> E3[INSERT\nventa $75]
+  E3 --> TOTAL[Total = $425\nSUM de eventos]
+```
+
 ### El schema en Drizzle
 
 ```ts

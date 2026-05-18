@@ -34,6 +34,13 @@ La idea es simple: en vez de cambiar la base de datos de golpe, lo haces en dos 
 
 Entre esos dos deploys puede pasar horas, días o semanas. No hay prisa.
 
+```mermaid
+graph LR
+  D1[Deploy 1\nExpand\nAgregar columna nueva\ncódigo viejo + nuevo conviven] --> D2[Deploy 2\nMigrate datos\nVerificar integridad]
+  D2 --> D3[Deploy 3\nContract\nEliminar columna vieja]
+  D3 --> OK[Sin downtime\nSin pérdida de datos]
+```
+
 **2. ¿Por qué no hay down-migrations en producción?**
 
 Una down-migration es el script que deshace una migration: borra columnas, elimina tablas, revierte cambios de schema. En teoría, si algo sale mal, corres la down-migration y vuelves al estado anterior.

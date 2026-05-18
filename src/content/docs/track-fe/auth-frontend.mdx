@@ -44,6 +44,18 @@ Las sesiones de Rush tienen dos tokens:
 
 Cuando el access token expira, el API devuelve `401`. El frontend intercepta ese `401`, pide un nuevo access token usando el refresh token, y reintenta el request original.
 
+```mermaid
+sequenceDiagram
+  participant FE as Frontend
+  participant API
+  FE->>API: GET /sales (access token expirado)
+  API-->>FE: 401 Unauthorized
+  FE->>API: POST /auth/refresh (refresh token en cookie)
+  API-->>FE: nuevo access token
+  FE->>API: GET /sales (nuevo token)
+  API-->>FE: 200 OK datos
+```
+
 El interceptor vive en la instancia de axios o en el fetch wrapper:
 
 ```ts

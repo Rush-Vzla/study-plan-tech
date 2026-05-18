@@ -71,11 +71,12 @@ Esto elimina todas las queries del cache. Es el equivalente de hacer logout del 
 
 El `TenantProvider` es el contexto que hace disponible el `businessId` activo en toda la aplicación. Cuando el usuario cambia de negocio, el provider actualiza el valor y dispara el reset del cache.
 
-```tsx
-flowchart LR
+```mermaid
+graph LR
   User -->|selecciona negocio| TenantProvider
-  TenantProvider -->|reset| QueryClient
+  TenantProvider -->|queryClient.clear| QueryClient
   TenantProvider -->|nuevo businessId| Components
+  Components -->|queryKey con tenantId| QueryClient
 ```
 
 ## 2. Lab guiado

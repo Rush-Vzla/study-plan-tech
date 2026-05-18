@@ -56,6 +56,13 @@ export function SalesPage() {
 
 Este componente hace todo: fetching, lógica de negocio y presentación. Para testearlo necesitas mockear TanStack Query, el contexto de tenant, y el fetch. Es complicado.
 
+```mermaid
+graph LR
+  QUERY[TanStack Query\nContexto] --> CONTAINER[SalesContainer\nlógica + datos]
+  CONTAINER -->|props: sales, onDuplicate| PRES[SalesList\nUI pura]
+  PRES -->|testeable sin mocks de red| TEST[Vitest\nstorybook]
+```
+
 ### Container: la capa de datos y lógica
 
 El container sabe de dónde vienen los datos y qué hacer con ellos. No sabe cómo se ven.

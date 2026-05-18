@@ -145,6 +145,18 @@ export class RateLimitGuard implements CanActivate {
 
 Un job que falla 3 veces sin éxito queda en la dead letter queue. En Rush, hay un dashboard interno (BullMQ Bull Board) donde el equipo puede ver los jobs fallidos, revisar el error y decidir si re-encolarlos o descartarlos.
 
+```mermaid
+stateDiagram-v2
+  [*] --> waiting: encolado
+  waiting --> active: worker disponible
+  active --> completed: éxito
+  active --> failed: error (intento 1-2)
+  failed --> waiting: retry con backoff
+  active --> delayed: error (agota reintentos)
+  delayed --> dlq: dead letter queue
+  completed --> [*]
+```
+
 ## 2. Lab guiado
 
 <LabSpec

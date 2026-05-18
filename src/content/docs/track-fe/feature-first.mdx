@@ -62,6 +62,20 @@ src/
 └── hooks/                   <- hooks genéricos (useWindowSize, useDebounce)
 ```
 
+```mermaid
+graph TD
+  SRC[src/] --> FEATURES[features/]
+  SRC --> COMPONENTS[components/\ngenéricos]
+  SRC --> LIB[lib/\nconfig]
+  FEATURES --> SALES[sales/]
+  FEATURES --> INVENTORY[inventory/]
+  FEATURES --> AUTH[auth/]
+  SALES --> SCOMP[components/]
+  SALES --> SHOOKS[hooks/]
+  SALES --> SAPI[api/]
+  SALES --> SIDX[index.ts barrel]
+```
+
 Vale, ahora la regla práctica: si un componente, hook o función solo tiene sentido dentro de `sales/`, vive en `features/sales/`. Si lo necesitas desde dos features distintos, ahí sí va a `components/` o `hooks/` global.
 
 ### El barrel export del feature

@@ -39,12 +39,16 @@ En Rush, el flujo es simple: feature branches + squash merge + conventional comm
 
 Todo cambio vive en una rama separada de `main`. Nunca se trabaja directamente en `main`.
 
-```text
-main ─────────────────────────────────►
-        │                   ▲
-        │ (crea rama)       │ (PR merge)
-        ▼                   │
-feat/add-rls-policy ───────►
+```mermaid
+gitGraph
+  commit id: "chore: initial commit"
+  branch feat/add-rls-policy
+  checkout feat/add-rls-policy
+  commit id: "feat(rls): define policy"
+  commit id: "test(rls): add testcontainer"
+  checkout main
+  merge feat/add-rls-policy id: "feat(rls): add tenant isolation"
+  commit id: "feat(sales): new feature"
 ```
 
 La convención de nombres en Rush:

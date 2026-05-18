@@ -31,6 +31,16 @@ Imagínate que un request de ventas tarda 800ms. Los logs te dicen que entró y 
 
 El tracing responde exactamente eso. Cada operación dentro del request produce un **span** con su duración y atributos. El conjunto de spans de un request forma una **traza**, que puedes visualizar como un gráfico de Gantt.
 
+```mermaid
+graph TD
+  ROOT[POST /sales — 800ms] --> GUARD[JwtGuard — 10ms]
+  ROOT --> PIPE[ZodPipe — 5ms]
+  ROOT --> HANDLER[SalesController — 780ms]
+  HANDLER --> RLS[SET app.current_business_id — 2ms]
+  HANDLER --> QUERY[INSERT sales_events — 750ms]
+  HANDLER --> SERIAL[serializar respuesta — 5ms]
+```
+
 **2. ¿Qué es OpenTelemetry y por qué usarlo?**
 
 OpenTelemetry (OTel) es un estándar abierto para instrumentación de observabilidad. En vez de depender de la librería de tracing del vendor (Datadog, Jaeger, Zipkin), OTel te da un SDK neutral que puede exportar a cualquier backend.

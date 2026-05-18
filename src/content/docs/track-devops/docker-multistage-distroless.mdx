@@ -39,6 +39,13 @@ Para el backend de Rush usamos tres etapas:
 - `build`: parte de deps, instala dev-deps, compila TypeScript, produce `dist/`.
 - `runtime`: parte de la imagen distroless, copia solo `node_modules/` de `deps` y `dist/` de `build`.
 
+```mermaid
+graph LR
+  DEPS[deps\nnode:24-alpine\ninstala prod deps] --> BUILD[build\ninstala dev deps\ncompila TypeScript]
+  DEPS -->|node_modules/| RUNTIME
+  BUILD -->|dist/| RUNTIME[runtime\ndistroless/nodejs:nonroot\nUSER nonroot]
+```
+
 El resultado final es una imagen que tiene el runtime de Node, tus módulos de producción y el JavaScript compilado. Nada más.
 
 **3. ¿Por qué el usuario importa? ¿Qué significa `nonroot`?**
