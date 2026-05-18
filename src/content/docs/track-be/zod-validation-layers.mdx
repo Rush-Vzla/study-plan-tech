@@ -1,0 +1,180 @@
+---
+title: "Validación Zod en dos capas"
+description: Por qué validar en el borde HTTP Y en cada use case — una sola capa no es suficiente para garantizar la integridad de los datos en un sistema multi-tenant.
+sidebar:
+  order: 21
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - modulo-0/zod-schemas
+  - track-be/nestjs-guards-pipes
+learning_outcomes:
+  - Entender por qué validar solo en el controller no es suficiente
+  - Implementar schemas Zod compartidos entre la capa HTTP y la capa de use case
+  - Reutilizar schemas del paquete shared-schemas
+  - Identificar qué validaciones van en qué capa
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+La validación en el borde HTTP (el pipe del controller) verifica que el request tenga la forma correcta. Pero eso no es suficiente para garantizar la integridad del negocio.
+
+Fíjate en este escenario: el endpoint de ventas tiene un pipe Zod que valida `{ amount: number, currency: string }`. Perfecto. Pero ahora el `SalesService` también se puede llamar internamente — desde un job de BullMQ que procesa importaciones de datos. Ese job no pasa por el controller. Si la validación solo está en el controller, los datos importados entran sin validar.
+
+### Las dos capas de validación
+
+**Capa 1 — Borde HTTP (controller)**: valida la forma del request HTTP. El schema aquí refleja lo que el API acepta públicamente.
+
+**Capa 2 — Use case (service)**: valida las invariantes del negocio antes de ejecutar la operación. El schema aquí refleja qué datos son válidos para esa operación, independientemente de cómo llegaron.
+
+```ts
+// Capa 1: schema del request HTTP
+const createSaleHttpSchema = z.object({
+  amount: z.number().positive(),
+  currency: z.enum(['VES', 'USD']),
+  idempotencyKey: z.string().uuid(),
+});
+
+// Capa 2: schema del use case (puede ser más estricto)
+const recordSaleUseCaseSchema = z.object({
+  businessId: z.string().uuid(),
+  amount: z.number().positive().max(999_999_999),
+  currency: z.enum(['VES', 'USD']),
+  idempotencyKey: z.string().uuid(),
+});
+```
+
+El schema del use case agrega `businessId` (que no viene del body, viene del usuario autenticado) y agrega el límite de monto (que es una regla de negocio, no de formato HTTP).
+
+### Reutilizar schemas entre capas
+
+Si el schema del request y el del use case son casi iguales, no los dupliques. Extiende:
+
+```ts
+// src/sales/sales.schemas.ts
+import { z } from 'zod';
+
+export const saleBaseSchema = z.object({
+  amount: z.number().positive().max(999_999_999),
+  currency: z.enum(['VES', 'USD']),
+});
+
+export const createSaleHttpSchema = saleBaseSchema.extend({
+  idempotencyKey: z.string().uuid(),
+});
+
+export const recordSaleUseCaseSchema = saleBaseSchema.extend({
+  businessId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+});
+
+export type CreateSaleDto = z.infer<typeof createSaleHttpSchema>;
+export type RecordSaleParams = z.infer<typeof recordSaleUseCaseSchema>;
+```
+
+### El service valida con el schema del use case
+
+```ts
+// src/sales/sales.service.ts
+async recordSale(params: RecordSaleParams) {
+  const validated = recordSaleUseCaseSchema.parse(params);
+  return this.repo.insert(validated.businessId, String(validated.amount), validated.currency);
+}
+```
+
+Si un job de BullMQ llama al service con datos incorrectos, el `parse` lanza un error en la capa correcta — en el use case, no llega a la base de datos.
+
+### Qué validaciones van en qué capa
+
+| Tipo de validación | Capa HTTP | Capa use case |
+|---|---|---|
+| Formato del request (tipos, shape) | ✓ | — |
+| Reglas de negocio (límites, invariantes) | — | ✓ |
+| Existencia de entidades referenciadas | — | ✓ |
+| Permisos sobre el tenant | — | ✓ |
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Schemas Zod en controller y service"
+  estimatedMinutes={30}
+  runnable={false}
+>
+
+Vas a separar los schemas de la capa HTTP y de la capa de use case, y verificar que ambos validan independientemente.
+
+### Paso 1: crear el archivo de schemas
+
+Crea `src/sales/sales.schemas.ts` con los schemas del ejemplo.
+
+### Paso 2: usar el schema HTTP en el controller
+
+```ts
+// src/sales/sales.controller.ts
+@Post(':businessId')
+create(
+  @Param('businessId') businessId: string,
+  @Body(new ZodValidationPipe(createSaleHttpSchema)) dto: CreateSaleDto,
+  @Req() req: { user: { id: string } },
+) {
+  return this.salesService.recordSale({
+    businessId,
+    amount: dto.amount,
+    currency: dto.currency,
+    idempotencyKey: dto.idempotencyKey,
+  });
+}
+```
+
+### Paso 3: usar el schema del use case en el service
+
+El service llama a `recordSaleUseCaseSchema.parse(params)` antes de cualquier operación de negocio.
+
+### Paso 4: simular una llamada interna sin pasar por el controller
+
+```ts
+// test/sales/sales.service.spec.ts
+it('rejects invalid businessId from internal call', async () => {
+  await expect(
+    salesService.recordSale({
+      businessId: 'not-a-uuid',
+      amount: 100,
+      currency: 'USD',
+      idempotencyKey: '550e8400-e29b-41d4-a716-446655440000',
+    }),
+  ).rejects.toThrow();
+});
+```
+
+### Verificación final
+
+El test pasa. El service rechaza los datos incorrectos aunque vengan de un job interno — no de un request HTTP. La validación de la capa de use case funciona independientemente del controller.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Validación Zod en dos capas">
+
+1. ¿Qué escenario concreto hace que la validación solo en el controller no sea suficiente?
+2. ¿Qué diferencia hay entre las reglas de validación del schema HTTP y las del schema de use case?
+3. Si un schema de use case y el schema HTTP son idénticos, ¿tiene sentido tenerlos separados?
+
+- [ ] El service tiene su propio schema Zod que valida antes de ejecutar la operación.
+- [ ] Una llamada al service con `businessId: 'not-a-uuid'` falla en el service, no solo en el controller.
+- [ ] Los schemas base se reutilizan con `.extend()` — no hay duplicación de código.
+
+</Checkpoint>
+
+## Próxima unidad → [Pino: logs estructurados que no filtran datos](../pino-logs/)

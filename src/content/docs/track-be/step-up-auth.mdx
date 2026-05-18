@@ -1,0 +1,235 @@
+---
+title: "Step-up auth: segundo factor para operaciones críticas"
+description: OTP fresco almacenado en Redis con TTL de 300 segundos para proteger operaciones sensibles como anulación de ventas y cambios de datos del negocio.
+sidebar:
+  order: 12
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/better-auth-multitenant
+  - track-be/redis-bullmq
+learning_outcomes:
+  - Implementar OTP de step-up con Redis y TTL de 300 segundos
+  - Definir la lista cerrada de operaciones que requieren step-up
+  - Crear el guard de step-up en NestJS
+  - Integrar el flujo de step-up con el email de verificación
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+El step-up auth agrega un segundo factor de verificación antes de operaciones que tienen consecuencias financieras importantes. La sesión normal confirma que eres tú. El step-up confirma que en este momento, con este dispositivo, quieres hacer esta operación específica.
+
+### ¿Cuándo se requiere step-up?
+
+Rush define una lista cerrada de operaciones que siempre necesitan step-up:
+
+1. Anular una venta ya registrada
+2. Cambiar los datos bancarios del negocio
+3. Eliminar un empleado
+4. Exportar datos en bloque
+5. Cambiar la tasa de cambio de referencia
+
+Esa lista es fija — no hay una config dinámica que la cambie. Si un dev necesita agregar una operación a la lista, es un cambio de código con code review.
+
+### El OTP en Redis
+
+El OTP de step-up vive en Redis, no en PostgreSQL. La razón: los OTPs tienen TTL corto (5 minutos) y se leen y borran en un solo flujo. Redis es más rápido y más apropiado para datos efímeros.
+
+```ts
+// src/auth/step-up.service.ts
+import { Injectable } from '@nestjs/common';
+import { Redis } from 'ioredis';
+import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
+
+const OTP_TTL_SECONDS = 300;
+const OTP_PREFIX = 'step-up:';
+
+@Injectable()
+export class StepUpService {
+  constructor(private readonly redis: Redis) {}
+
+  async requestOtp(userId: string): Promise<string> {
+    const otp = String(randomInt(100000, 999999));
+    const hash = await bcrypt.hash(otp, 10);
+    const key = `${OTP_PREFIX}${userId}`;
+
+    await this.redis.setex(key, OTP_TTL_SECONDS, hash);
+    return otp;
+  }
+
+  async verifyOtp(userId: string, otp: string): Promise<boolean> {
+    const key = `${OTP_PREFIX}${userId}`;
+    const hash = await this.redis.get(key);
+
+    if (!hash) return false;
+
+    const valid = await bcrypt.compare(otp, hash);
+    if (valid) {
+      await this.redis.del(key);
+    }
+
+    return valid;
+  }
+}
+```
+
+Fíjate en el `bcrypt.hash`: el OTP se guarda hasheado en Redis. Si alguien accede a Redis, no ve el OTP en texto plano. Y el `del` después de verificar garantiza que el OTP solo puede usarse una vez.
+
+### El guard de step-up
+
+```ts
+// src/auth/guards/step-up.guard.ts
+import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { StepUpService } from '../step-up.service';
+
+@Injectable()
+export class StepUpGuard implements CanActivate {
+  constructor(private readonly stepUp: StepUpService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<{
+      user: { id: string };
+      headers: Record<string, string>;
+    }>();
+
+    const otp = req.headers['x-step-up-otp'];
+    if (!otp) {
+      throw new ForbiddenException('Step-up OTP required for this operation');
+    }
+
+    const valid = await this.stepUp.verifyOtp(req.user.id, otp);
+    if (!valid) {
+      throw new ForbiddenException('Invalid or expired step-up OTP');
+    }
+
+    return true;
+  }
+}
+```
+
+### Aplicarlo a un endpoint
+
+```ts
+@Delete(':businessId/sales/:eventId')
+@UseGuards(SessionGuard, StepUpGuard)
+async cancelSale(
+  @Param('businessId') businessId: string,
+  @Param('eventId') eventId: string,
+) {
+  return this.salesService.compensateSale(businessId, eventId);
+}
+```
+
+El request debe incluir el header `x-step-up-otp` con el OTP enviado por email. Sin él, el guard devuelve 403 antes de que el controller se ejecute.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="OTP de step-up con Redis + bcrypt"
+  estimatedMinutes={40}
+  runnable={false}
+>
+
+Vas a implementar el flujo completo de step-up: solicitar OTP, recibirlo por consola (simulando email), y usarlo en un endpoint protegido.
+
+### Paso 1: levantar Redis
+
+```bash
+docker run -d --name lab-redis -p 6379:6379 redis:7
+```
+
+### Paso 2: instalar dependencias
+
+```bash
+pnpm add ioredis bcrypt
+pnpm add -D @types/bcrypt
+```
+
+### Paso 3: configurar Redis en NestJS
+
+```ts
+// src/redis/redis.module.ts
+import { Module, Global } from '@nestjs/common';
+import Redis from 'ioredis';
+
+@Global()
+@Module({
+  providers: [
+    {
+      provide: 'REDIS',
+      useFactory: () => new Redis({ host: 'localhost', port: 6379 }),
+    },
+  ],
+  exports: ['REDIS'],
+})
+export class RedisModule {}
+```
+
+Inyecta Redis en `StepUpService` usando `@Inject('REDIS')`.
+
+### Paso 4: implementar StepUpService y StepUpGuard
+
+Usa los ejemplos de arriba.
+
+### Paso 5: endpoints de OTP
+
+```ts
+@Post('step-up/request')
+@UseGuards(SessionGuard)
+async requestOtp(@Req() req: { user: { id: string } }) {
+  const otp = await this.stepUpService.requestOtp(req.user.id);
+  console.log(`[DEV] OTP for ${req.user.id}: ${otp}`);
+  return { message: 'OTP sent' };
+}
+```
+
+En producción, `console.log` se reemplaza por el envío de email. En el lab, el OTP aparece en el log del servidor.
+
+### Verificación final
+
+Solicita un OTP:
+
+```bash
+curl -X POST http://localhost:3000/step-up/request \
+  -H "Cookie: <session-cookie>"
+```
+
+Copia el OTP del log del servidor. Usa el OTP en el endpoint protegido:
+
+```bash
+curl -X DELETE http://localhost:3000/sales/biz-123/events/event-id \
+  -H "Cookie: <session-cookie>" \
+  -H "x-step-up-otp: 123456"
+```
+
+Sin el OTP — 403. Con el OTP correcto — 200. Con el mismo OTP de nuevo — 403 (ya se consumió).
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Step-up auth: segundo factor para operaciones críticas">
+
+1. ¿Por qué el OTP se guarda hasheado en Redis y no en texto plano?
+2. ¿Qué pasa si el mismo OTP se reutiliza dos veces? ¿Cómo lo previene el código?
+3. ¿Por qué Redis es más apropiado que PostgreSQL para almacenar OTPs de step-up?
+
+- [ ] El OTP expira en Redis después de 300 segundos — no antes, no después.
+- [ ] El mismo OTP no puede usarse dos veces — el `del` después de verificar lo previene.
+- [ ] El endpoint protegido con `StepUpGuard` devuelve 403 sin el header, y 200 con OTP válido.
+
+</Checkpoint>
+
+## Próxima unidad → [Redis + BullMQ: jobs en background](../redis-bullmq/)

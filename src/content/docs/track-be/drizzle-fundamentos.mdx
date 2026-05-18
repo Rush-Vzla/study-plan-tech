@@ -1,0 +1,283 @@
+---
+title: "Drizzle ORM: SQL-first de verdad"
+description: Schema definition, migrations, queries tipadas y relaciones con Drizzle ORM sobre PostgreSQL 17 — sin N+1 ocultos.
+sidebar:
+  order: 4
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 4
+prerequisites:
+  - modulo-0/sql-real
+  - modulo-0/ts-estricto
+  - track-be/nestjs-fundamentos
+learning_outcomes:
+  - Definir schemas de tablas con Drizzle y generar migrations
+  - Escribir queries tipadas con relaciones sin N+1 ocultos
+  - Integrar Drizzle como provider de NestJS
+  - Entender por qué Drizzle es SQL-first y qué ventaja tiene sobre ORMs más abstractos
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+  drizzle: "0.x"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Drizzle ORM es el ORM que usa Rush. La razón: no esconde el SQL. Cuando escribes una query con Drizzle, sabes exactamente qué SQL va a ejecutarse. Eso es importante cuando estás trabajando con RLS, índices y performance en producción.
+
+### Definir un schema
+
+Un schema en Drizzle es código TypeScript. Las tablas son objetos tipados.
+
+```ts
+// src/db/schema/sales-events.ts
+import { pgTable, uuid, numeric, text, timestamp, index } from 'drizzle-orm/pg-core';
+
+export const salesEvents = pgTable(
+  'sales_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    amount: numeric('amount', { precision: 19, scale: 4 }).notNull(),
+    currency: text('currency').notNull(),
+    usdEquivalent: numeric('usd_equivalent', { precision: 19, scale: 4 }),
+    referenceRate: numeric('reference_rate', { precision: 19, scale: 6 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('sales_events_business_id_idx').on(table.businessId)],
+);
+```
+
+Fíjate en el índice en `business_id` — sin él, cualquier query que filtre por tenant escanea toda la tabla. En una app multi-tenant con miles de businesses, eso es un desastre de performance.
+
+### Generar y aplicar migrations
+
+```bash
+pnpm drizzle-kit generate
+pnpm drizzle-kit migrate
+```
+
+Drizzle compara el schema TypeScript con la base de datos y genera el SQL necesario. El archivo de migration queda en `drizzle/` y se puede commitear — así puedes rastrear todos los cambios de schema en git.
+
+### Queries tipadas
+
+```ts
+// buscar ventas de un business
+const sales = await db
+  .select()
+  .from(salesEvents)
+  .where(eq(salesEvents.businessId, businessId))
+  .orderBy(desc(salesEvents.createdAt))
+  .limit(50);
+```
+
+El tipo de `sales` es inferido automáticamente. Si el schema cambia, TypeScript se queja antes de que llegues a producción.
+
+### Relaciones sin N+1
+
+El problema N+1 es cuando haces una query para obtener N registros y luego haces N queries más para obtener datos relacionados. Con Drizzle, usas `with` para incluir relaciones en una sola query.
+
+Primero defines la relación:
+
+```ts
+// src/db/schema/relations.ts
+import { relations } from 'drizzle-orm';
+import { salesEvents } from './sales-events';
+import { businesses } from './businesses';
+
+export const salesEventsRelations = relations(salesEvents, ({ one }) => ({
+  business: one(businesses, {
+    fields: [salesEvents.businessId],
+    references: [businesses.id],
+  }),
+}));
+```
+
+Luego la usas en la query:
+
+```ts
+const salesWithBusiness = await db.query.salesEvents.findMany({
+  with: { business: true },
+  where: (t, { eq }) => eq(t.businessId, businessId),
+});
+```
+
+Una sola query SQL con JOIN — no N+1.
+
+### Integrar Drizzle como provider de NestJS
+
+```ts
+// src/drizzle/drizzle.service.ts
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from '../db/schema';
+
+@Injectable()
+export class DrizzleService implements OnModuleInit, OnModuleDestroy {
+  private pool!: Pool;
+  db!: NodePgDatabase<typeof schema>;
+
+  onModuleInit() {
+    this.pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
+    this.db = drizzle(this.pool, { schema });
+  }
+
+  async onModuleDestroy() {
+    await this.pool.end();
+  }
+}
+```
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Schema + queries con Drizzle + PostgreSQL"
+  estimatedMinutes={70}
+  runnable={false}
+>
+
+Vas a definir un schema de ventas, generar migrations y escribir queries tipadas.
+
+### Paso 1: setup del proyecto
+
+```bash
+mkdir lab-drizzle && cd lab-drizzle
+pnpm init
+pnpm add drizzle-orm pg
+pnpm add -D drizzle-kit @types/pg typescript tsx
+```
+
+Crea `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "outDir": "dist"
+  }
+}
+```
+
+### Paso 2: definir el schema
+
+```ts
+// src/schema.ts
+import { pgTable, uuid, numeric, text, timestamp } from 'drizzle-orm/pg-core';
+
+export const businesses = pgTable('businesses', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const salesEvents = pgTable('sales_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  businessId: uuid('business_id').notNull().references(() => businesses.id),
+  amount: numeric('amount', { precision: 19, scale: 4 }).notNull(),
+  currency: text('currency').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+### Paso 3: configurar drizzle-kit
+
+```ts
+// drizzle.config.ts
+import { defineConfig } from 'drizzle-kit';
+
+export default defineConfig({
+  schema: './src/schema.ts',
+  out: './drizzle',
+  dialect: 'postgresql',
+  dbCredentials: { url: process.env['DATABASE_URL'] ?? '' },
+});
+```
+
+### Paso 4: generar y aplicar la migration
+
+Levanta un Postgres 17 local:
+
+```bash
+docker run -d --name lab-pg \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=labdb \
+  -p 5432:5432 postgres:17
+```
+
+Genera y aplica:
+
+```bash
+DATABASE_URL=postgres://postgres:password@localhost:5432/labdb pnpm drizzle-kit generate
+DATABASE_URL=postgres://postgres:password@localhost:5432/labdb pnpm drizzle-kit migrate
+```
+
+### Paso 5: escribir queries
+
+```ts
+// src/queries.ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from './schema';
+import { eq } from 'drizzle-orm';
+
+const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
+const db = drizzle(pool, { schema });
+
+async function run() {
+  const [biz] = await db.insert(schema.businesses).values({ name: 'Test Business' }).returning();
+  console.log('Created business:', biz.id);
+
+  await db.insert(schema.salesEvents).values([
+    { businessId: biz.id, amount: '100.00', currency: 'USD' },
+    { businessId: biz.id, amount: '50.00', currency: 'VES' },
+  ]);
+
+  const sales = await db
+    .select()
+    .from(schema.salesEvents)
+    .where(eq(schema.salesEvents.businessId, biz.id));
+
+  console.log('Sales:', sales);
+  await pool.end();
+}
+
+run().catch(console.error);
+```
+
+### Verificación final
+
+```bash
+DATABASE_URL=postgres://postgres:password@localhost:5432/labdb npx tsx src/queries.ts
+```
+
+Debes ver el ID del business creado y la lista de 2 ventas. Si TypeScript se queja de tipos en algún punto, investiga el error antes de continuar — es parte del aprendizaje.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Drizzle ORM: SQL-first de verdad">
+
+1. ¿Qué diferencia hay entre `db.select().from(table).where(...)` y `db.query.table.findMany({with: ...})`? ¿Cuándo usarías cada uno?
+2. ¿Por qué Drizzle genera archivos de migration en vez de aplicar cambios automáticamente al schema?
+3. Si no pones un índice en `business_id` en una tabla con 10 millones de filas y 10.000 tenants, ¿qué pasa con la performance de una query que filtra por tenant?
+
+- [ ] El schema de `salesEvents` tiene la relación correcta a `businesses` y el índice en `business_id`.
+- [ ] Las migrations se generaron y aplicaron sin errores — las tablas existen en Postgres.
+- [ ] Las queries de inserción y consulta funcionan con tipos inferidos correctamente por TypeScript.
+
+</Checkpoint>
+
+## Próxima unidad → [RLS: PostgreSQL como barrera de aislamiento](../rls-multi-tenant/)

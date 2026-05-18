@@ -1,0 +1,223 @@
+---
+title: "Doble moneda: VES + USD en Rush"
+description: La 4-tupla (amount, currency, usd_equivalent, reference_rate) para manejar montos en bolívares y dólares sin hardcodear ninguna tasa de cambio.
+sidebar:
+  order: 10
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 3
+prerequisites:
+  - track-be/append-only-eventos
+  - modulo-0/sql-real
+learning_outcomes:
+  - Entender por qué la doble moneda requiere guardar la tasa de referencia junto con el monto
+  - Implementar la 4-tupla en el schema de Drizzle
+  - Diseñar la tabla exchange_rates para auditoría de tasas
+  - Calcular equivalentes en USD sin queries a APIs externas en tiempo real
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  drizzle: "0.x"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Venezuela tiene un contexto monetario particular: los negocios operan en bolívares (VES) y dólares (USD) al mismo tiempo. Un negocio puede recibir el pago de una venta en VES, pero querer reportar sus métricas en USD.
+
+El problema técnico: la tasa de cambio varía todos los días. Si guardas solo el monto en VES, no puedes saber cuánto valía esa venta en USD el día que ocurrió — la tasa de hoy es distinta a la de ayer.
+
+### La 4-tupla
+
+La solución de Rush es guardar cuatro valores por cada monto monetario:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `amount` | NUMERIC(19,4) | El monto en la moneda original de la transacción |
+| `currency` | TEXT | La moneda del monto ('VES' o 'USD') |
+| `usd_equivalent` | NUMERIC(19,4) | El equivalente en USD al momento de la transacción |
+| `reference_rate` | NUMERIC(19,6) | La tasa VES/USD usada para el cálculo |
+
+Fíjate que guardar `reference_rate` es lo que permite auditoría: puedes verificar exactamente con qué tasa se convirtió ese monto, sin depender de una fuente externa.
+
+### El schema
+
+```ts
+// En sales_events o cualquier tabla con montos
+amount: numeric('amount', { precision: 19, scale: 4 }).notNull(),
+currency: text('currency').notNull(),
+usdEquivalent: numeric('usd_equivalent', { precision: 19, scale: 4 }),
+referenceRate: numeric('reference_rate', { precision: 19, scale: 6 }),
+```
+
+Cuando el pago es en USD, `usd_equivalent` == `amount` y `reference_rate` == 1.
+
+### La tabla exchange_rates
+
+```ts
+// src/db/schema/exchange-rates.ts
+import { pgTable, uuid, numeric, text, timestamp } from 'drizzle-orm/pg-core';
+
+export const exchangeRates = pgTable('exchange_rates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  fromCurrency: text('from_currency').notNull(),
+  toCurrency: text('to_currency').notNull(),
+  rate: numeric('rate', { precision: 19, scale: 6 }).notNull(),
+  source: text('source').notNull(),
+  effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+El campo `source` documenta de dónde viene la tasa (la API del banco que use el negocio, un webhook del ERP, o el rate ingresado manualmente por el dueño del negocio). La tasa nunca se hardcodea — siempre viene de la tabla.
+
+### Obtener la tasa vigente
+
+```ts
+async getCurrentRate(from: string, to: string): Promise<number> {
+  const [rate] = await this.drizzle.db
+    .select({ rate: exchangeRates.rate })
+    .from(exchangeRates)
+    .where(
+      and(
+        eq(exchangeRates.fromCurrency, from),
+        eq(exchangeRates.toCurrency, to),
+      ),
+    )
+    .orderBy(desc(exchangeRates.effectiveAt))
+    .limit(1);
+
+  if (!rate) {
+    throw new DomainError('EXCHANGE_RATE_NOT_FOUND', `No rate found for ${from}/${to}`);
+  }
+
+  return parseFloat(rate.rate);
+}
+```
+
+### Calcular y guardar la 4-tupla
+
+```ts
+async recordSaleWithDualCurrency(
+  businessId: string,
+  amount: number,
+  currency: 'VES' | 'USD',
+): Promise<SaleEvent> {
+  let usdEquivalent: number;
+  let referenceRate: number;
+
+  if (currency === 'USD') {
+    usdEquivalent = amount;
+    referenceRate = 1;
+  } else {
+    referenceRate = await this.exchangeRateService.getCurrentRate('VES', 'USD');
+    usdEquivalent = amount / referenceRate;
+  }
+
+  return this.drizzle.db.insert(salesEvents).values({
+    businessId,
+    amount: String(amount),
+    currency,
+    usdEquivalent: String(usdEquivalent),
+    referenceRate: String(referenceRate),
+  }).returning().then(([event]) => event);
+}
+```
+
+### ¿Qué no va en el Plan B?
+
+El Plan B te enseña el patrón técnico: cómo almacenar y calcular la 4-tupla. No te explica cuándo usar la tasa BCV vs la tasa paralela, ni cómo manejar la fluctuación diaria en los reportes. Esas son decisiones de negocio de Rush.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Tabla exchange_rates + cálculo de 4-tupla"
+  estimatedMinutes={50}
+  runnable={false}
+>
+
+Vas a implementar la tabla de tasas y la lógica de conversión de moneda.
+
+### Paso 1: agregar los campos de doble moneda a sales_events
+
+```ts
+// src/db/schema/sales-events.ts
+usdEquivalent: numeric('usd_equivalent', { precision: 19, scale: 4 }),
+referenceRate: numeric('reference_rate', { precision: 19, scale: 6 }),
+```
+
+### Paso 2: crear la tabla exchange_rates
+
+Usa el schema del ejemplo y genera la migration:
+
+```bash
+pnpm drizzle-kit generate
+pnpm drizzle-kit migrate
+```
+
+### Paso 3: insertar una tasa inicial
+
+```ts
+// src/seeds/exchange-rates.seed.ts
+await db.insert(exchangeRates).values({
+  fromCurrency: 'VES',
+  toCurrency: 'USD',
+  rate: '36.50',
+  source: 'manual',
+  effectiveAt: new Date(),
+});
+```
+
+### Paso 4: implementar ExchangeRateService
+
+Crea el service con el método `getCurrentRate` del ejemplo.
+
+### Paso 5: actualizar recordSale
+
+Actualiza el método de registro de ventas para calcular y guardar la 4-tupla.
+
+### Verificación final
+
+Registra una venta en VES:
+
+```bash
+curl -X POST http://localhost:3000/sales/biz-123 \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 365, "currency": "VES"}'
+```
+
+La respuesta debe incluir `usdEquivalent ≈ 10` (365 / 36.50) y `referenceRate: "36.500000"`.
+
+Registra una venta en USD:
+
+```bash
+curl -X POST http://localhost:3000/sales/biz-123 \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 50, "currency": "USD"}'
+```
+
+La respuesta debe tener `usdEquivalent: "50.0000"` y `referenceRate: "1.000000"`.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Doble moneda: VES + USD en Rush">
+
+1. ¿Por qué necesitas guardar `reference_rate` junto con `usd_equivalent`? ¿Qué problema resuelve?
+2. Si la tasa de cambio sube un 10% después de que registraste una venta, ¿cambia el `usd_equivalent` guardado de esa venta?
+3. ¿Qué error debería devolver el sistema si no hay ninguna tasa registrada para el par VES/USD?
+
+- [ ] Una venta en VES tiene `usd_equivalent` calculado correctamente usando la tasa del momento de registro.
+- [ ] Una venta en USD tiene `usd_equivalent == amount` y `reference_rate == 1`.
+- [ ] El sistema lanza un domain error si no hay tasa disponible — no hardcodea ningún valor.
+
+</Checkpoint>
+
+## Próxima unidad → [Better Auth: auth multi-tenant sin cookieCache](../better-auth-multitenant/)

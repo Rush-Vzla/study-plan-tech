@@ -1,0 +1,210 @@
+---
+title: "Rate limiting jerárquico"
+description: Tres niveles de rate limiting con Redis — global por IP, por tenant y por usuario — para proteger el API de abuso sin afectar a tenants legítimos.
+sidebar:
+  order: 20
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/redis-bullmq
+  - track-be/nestjs-guards-pipes
+learning_outcomes:
+  - Implementar rate limiting distribuido con Redis en NestJS
+  - Diseñar tres niveles de límite — global, por tenant y por usuario
+  - Aplicar el guard de rate limiting en los endpoints correctos
+  - Devolver el header Retry-After cuando el límite se alcanza
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+El rate limiting protege el API de dos tipos de abuso: ataques intencionales (bots, scrapers) y errores de código en el cliente (loops que hacen cientos de requests por segundo sin darse cuenta).
+
+Un solo nivel de rate limiting no es suficiente. Si el límite es solo por IP, un atacante usa múltiples IPs. Si es solo por tenant, un tenant malintencionado puede hacer muchas requests. Rush usa tres niveles jerárquicos.
+
+### Los tres niveles
+
+**Nivel 1 — Global por IP**: 200 requests por minuto desde la misma IP, sin importar qué tenant o usuario. Protege contra bots que no tienen autenticación.
+
+**Nivel 2 — Por tenant**: 1.000 requests por minuto por tenant. Un tenant no puede saturar el API aunque use múltiples usuarios.
+
+**Nivel 3 — Por usuario**: 100 requests por minuto por usuario individual. Protege contra usuarios que tienen un bug en su código de integración.
+
+### La implementación con Redis
+
+```ts
+// src/common/guards/rate-limit.guard.ts
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { TooManyRequestsException } from '@nestjs/common';
+import Redis from 'ioredis';
+
+interface RateLimitConfig {
+  key: string;
+  limit: number;
+  windowSeconds: number;
+}
+
+@Injectable()
+export class RateLimitGuard implements CanActivate {
+  constructor(private readonly redis: Redis) {}
+
+  private async checkLimit(config: RateLimitConfig): Promise<boolean> {
+    const { key, limit, windowSeconds } = config;
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      await this.redis.expire(key, windowSeconds);
+    }
+    return count <= limit;
+  }
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<{
+      ip: string;
+      user?: { id: string; businessId: string };
+    }>();
+
+    const now = Math.floor(Date.now() / 60000);
+
+    const globalOk = await this.checkLimit({
+      key: `rl:global:${req.ip}:${now}`,
+      limit: 200,
+      windowSeconds: 60,
+    });
+
+    if (!globalOk) {
+      throw new TooManyRequestsException('Global rate limit exceeded');
+    }
+
+    if (req.user?.businessId) {
+      const tenantOk = await this.checkLimit({
+        key: `rl:tenant:${req.user.businessId}:${now}`,
+        limit: 1000,
+        windowSeconds: 60,
+      });
+
+      if (!tenantOk) {
+        throw new TooManyRequestsException('Tenant rate limit exceeded');
+      }
+    }
+
+    if (req.user?.id) {
+      const userOk = await this.checkLimit({
+        key: `rl:user:${req.user.id}:${now}`,
+        limit: 100,
+        windowSeconds: 60,
+      });
+
+      if (!userOk) {
+        throw new TooManyRequestsException('User rate limit exceeded');
+      }
+    }
+
+    return true;
+  }
+}
+```
+
+### El header Retry-After
+
+Cuando el límite se alcanza, el API debe incluir el header `Retry-After` con cuántos segundos debe esperar el cliente:
+
+```ts
+if (!globalOk) {
+  const ttl = await this.redis.ttl(`rl:global:${req.ip}:${now}`);
+  const response = context.switchToHttp().getResponse<{ setHeader: (key: string, value: string) => void }>();
+  response.setHeader('Retry-After', String(ttl));
+  throw new TooManyRequestsException('Global rate limit exceeded');
+}
+```
+
+### Dónde no poner rate limiting
+
+El guard global va en todos los endpoints protegidos. Pero para el endpoint de health check (`/health`) y para el endpoint de login, usa límites distintos:
+
+- `/health`: sin rate limit (necesita responder siempre para load balancers)
+- `/auth/sign-in`: rate limit estricto de 5 por minuto por IP para prevenir brute force
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Rate limiting de tres niveles con Redis"
+  estimatedMinutes={35}
+  runnable={false}
+>
+
+Vas a implementar el guard de rate limiting y verificar que cada nivel funciona independientemente.
+
+### Paso 1: implementar el guard
+
+Crea `src/common/guards/rate-limit.guard.ts` con el código del ejemplo.
+
+### Paso 2: aplicar el guard globalmente
+
+En `app.module.ts` o `main.ts`, registra el guard globalmente:
+
+```ts
+app.useGlobalGuards(new RateLimitGuard(redis));
+```
+
+### Paso 3: test de rate limiting
+
+Baja los límites temporalmente para el test:
+
+```ts
+const LIMITS = {
+  global: { limit: 5, windowSeconds: 60 },
+  tenant: { limit: 10, windowSeconds: 60 },
+  user: { limit: 3, windowSeconds: 60 },
+};
+```
+
+Envía 4 requests con el mismo usuario:
+
+```bash
+for i in {1..4}; do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    http://localhost:3000/sales/biz-123 \
+    -H "Content-Type: application/json" \
+    -d '{"amount": 1}'
+done
+```
+
+Los primeros 3 deben devolver 201. El 4to debe devolver 429.
+
+### Verificación final
+
+Verifica en Redis que la key de rate limit existe y tiene TTL:
+
+```bash
+docker exec -it lab-redis redis-cli TTL "rl:user:<user-id>:<window>"
+```
+
+Debe devolver un número entre 1 y 60.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Rate limiting jerárquico">
+
+1. ¿Por qué el rate limiting en Redis escala mejor que en memoria del proceso de NestJS?
+2. Si un tenant tiene un bug que hace 2.000 requests por minuto, ¿cuál de los tres niveles lo detiene primero?
+3. ¿Por qué el endpoint de health check no debe tener rate limiting?
+
+- [ ] El guard verifica los tres niveles en orden: global → tenant → usuario.
+- [ ] El response 429 incluye el header `Retry-After` con los segundos hasta el reset de la ventana.
+- [ ] El rate limit usa Redis — si correras 2 instancias del API, el contador sería compartido.
+
+</Checkpoint>
+
+## Próxima unidad → [Validación Zod en dos capas](../zod-validation-layers/)

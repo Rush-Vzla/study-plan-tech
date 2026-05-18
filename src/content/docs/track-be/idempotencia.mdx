@@ -1,0 +1,237 @@
+---
+title: "Idempotencia: operaciones que no se duplican"
+description: Tabla idempotency_keys con UNIQUE constraint para garantizar que un request procesado dos veces no duplique el efecto — crítico en sistemas de ventas.
+sidebar:
+  order: 9
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 3
+prerequisites:
+  - track-be/append-only-eventos
+  - track-be/nestjs-guards-pipes
+learning_outcomes:
+  - Implementar la tabla idempotency_keys con UNIQUE constraint por tenant
+  - Procesar el header Idempotency-Key en NestJS
+  - Devolver la respuesta cacheada para requests repetidos
+  - Limpiar keys expirados con TTL de 48 horas
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  drizzle: "0.x"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Una operación idempotente produce el mismo resultado si la haces una vez o si la haces diez veces. ¿Para qué sirve? Para que si el cliente manda el mismo request dos veces por error de red, el backend no duplique el efecto.
+
+Imagínate este escenario: el cliente registra una venta. El request llega al servidor, se procesa, pero la respuesta se pierde en el camino (timeout de red). El cliente no sabe si la venta se registró o no. Reintenta. Si no hay idempotencia, tienes dos ventas registradas.
+
+### El mecanismo: tabla idempotency_keys
+
+```sql
+CREATE TABLE idempotency_keys (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  business_id UUID NOT NULL,
+  key         TEXT NOT NULL,
+  response    JSONB NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  UNIQUE (business_id, key)
+);
+```
+
+El `UNIQUE (business_id, key)` es el corazón del mecanismo. Si el mismo cliente manda el mismo key para el mismo tenant, la base de datos lanza una violación de constraint único — y tú la captura para devolver la respuesta cacheada.
+
+### El schema en Drizzle
+
+```ts
+// src/db/schema/idempotency-keys.ts
+import { pgTable, uuid, text, jsonb, timestamp, unique } from 'drizzle-orm/pg-core';
+
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    key: text('key').notNull(),
+    response: jsonb('response').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [unique('idempotency_keys_unique').on(table.businessId, table.key)],
+);
+```
+
+### El flujo en el service
+
+```ts
+// src/common/services/idempotency.service.ts
+import { Injectable } from '@nestjs/common';
+import { DrizzleService } from '../../drizzle/drizzle.service';
+import { idempotencyKeys } from '../../db/schema/idempotency-keys';
+import { and, eq, gt } from 'drizzle-orm';
+
+const TTL_HOURS = 48;
+
+@Injectable()
+export class IdempotencyService {
+  constructor(private readonly drizzle: DrizzleService) {}
+
+  async getOrProcess<T>(
+    businessId: string,
+    key: string,
+    process: () => Promise<T>,
+  ): Promise<{ result: T; fromCache: boolean }> {
+    const now = new Date();
+
+    const [existing] = await this.drizzle.db
+      .select()
+      .from(idempotencyKeys)
+      .where(
+        and(
+          eq(idempotencyKeys.businessId, businessId),
+          eq(idempotencyKeys.key, key),
+          gt(idempotencyKeys.expiresAt, now),
+        ),
+      );
+
+    if (existing) {
+      return { result: existing.response as T, fromCache: true };
+    }
+
+    const result = await process();
+
+    await this.drizzle.db.insert(idempotencyKeys).values({
+      businessId,
+      key,
+      response: result as Record<string, unknown>,
+      expiresAt: new Date(now.getTime() + TTL_HOURS * 60 * 60 * 1000),
+    });
+
+    return { result, fromCache: false };
+  }
+}
+```
+
+### El header Idempotency-Key
+
+El cliente envía el header `Idempotency-Key` con un UUID único por cada intento lógico de operación. Si reintenta, envía el mismo UUID. El backend devuelve la misma respuesta sin procesar el request de nuevo.
+
+```ts
+// src/sales/sales.controller.ts
+@Post(':businessId')
+async createSale(
+  @Param('businessId') businessId: string,
+  @Headers('idempotency-key') idempotencyKey: string,
+  @Body() dto: CreateSaleDto,
+) {
+  if (!idempotencyKey) {
+    throw new BadRequestException('Idempotency-Key header is required');
+  }
+
+  const { result, fromCache } = await this.idempotencyService.getOrProcess(
+    businessId,
+    idempotencyKey,
+    () => this.salesService.recordSale(businessId, dto.amount, dto.currency),
+  );
+
+  return result;
+}
+```
+
+### TTL de 48 horas
+
+Los keys expiran después de 48 horas. Eso cubre el período donde un cliente podría razonablemente reintentar. Después de 48 horas, si el mismo key llega de nuevo, se procesa como nuevo.
+
+Para limpiar los keys expirados, puedes usar un job de BullMQ (lo verás en la unidad de Redis) o un cron de PostgreSQL con `pg_cron`.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Idempotencia con tabla PostgreSQL"
+  estimatedMinutes={55}
+  runnable={false}
+>
+
+Vas a implementar el mecanismo de idempotencia completo para el endpoint de ventas.
+
+### Paso 1: crear la tabla de idempotency_keys
+
+Usa el schema de Drizzle del ejemplo y genera la migration:
+
+```bash
+pnpm drizzle-kit generate
+pnpm drizzle-kit migrate
+```
+
+Verifica que el constraint UNIQUE existe:
+
+```bash
+docker exec -it lab-pg psql -U postgres -d labdb -c "\d idempotency_keys"
+```
+
+Debe mostrar el índice `idempotency_keys_unique` en las columnas `(business_id, key)`.
+
+### Paso 2: implementar el IdempotencyService
+
+Crea `src/common/services/idempotency.service.ts` con el código del ejemplo.
+
+Regístralo en `AppModule` o en un `CommonModule`.
+
+### Paso 3: aplicarlo al endpoint de ventas
+
+Actualiza `SalesController` para:
+
+1. Requerir el header `Idempotency-Key`.
+2. Usar `IdempotencyService.getOrProcess` antes de llamar al service.
+
+### Paso 4: test manual de idempotencia
+
+Registra una venta con el mismo key dos veces:
+
+```bash
+curl -X POST http://localhost:3000/sales/biz-123 \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{"amount": 100, "currency": "USD"}'
+
+curl -X POST http://localhost:3000/sales/biz-123 \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{"amount": 100, "currency": "USD"}'
+```
+
+### Verificación final
+
+Verifica que en la tabla `sales_events` hay exactamente 1 fila con `amount = 100`, no 2. La segunda llamada devolvió la respuesta cacheada.
+
+```bash
+docker exec -it lab-pg psql -U postgres -d labdb \
+  -c "SELECT COUNT(*) FROM sales_events;"
+```
+
+Debe devolver `1`.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Idempotencia: operaciones que no se duplican">
+
+1. ¿Por qué el UNIQUE constraint es `(business_id, key)` y no solo `(key)`?
+2. ¿Qué pasaría si el TTL fuera de 1 hora en vez de 48 horas?
+3. Si el cliente no envía el header `Idempotency-Key`, ¿cómo debería responder el API?
+
+- [ ] La segunda llamada con el mismo key devuelve la misma respuesta pero no crea una segunda fila en `sales_events`.
+- [ ] El constraint UNIQUE en `(business_id, key)` existe en la base de datos y aparece en el `\d` de PostgreSQL.
+- [ ] El endpoint rechaza requests sin `Idempotency-Key` con status 400.
+
+</Checkpoint>
+
+## Próxima unidad → [Doble moneda: VES + USD en Rush](../doble-moneda/)

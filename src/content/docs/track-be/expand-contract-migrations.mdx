@@ -1,0 +1,170 @@
+---
+title: "Migrations sin down-migrations"
+description: El patrón expand-contract para cambios de schema en producción — agregar antes de quitar, rollback es un redeploy, sin down-migrations que borran datos.
+sidebar:
+  order: 15
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/drizzle-fundamentos
+learning_outcomes:
+  - Aplicar el patrón expand-contract para cambios de schema sin downtime
+  - Generar y aplicar migrations con Drizzle Kit
+  - Entender por qué las down-migrations son peligrosas en producción
+  - Diseñar un plan de rollback basado en redeploy
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  drizzle: "0.x"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Un cambio de schema en producción es arriesgado si hay una instancia del API corriendo mientras la migration se aplica. Si renombras una columna, la instancia vieja del API que sigue corriendo durante el deploy busca el nombre viejo — y falla.
+
+El patrón expand-contract resuelve eso: en vez de un cambio destructivo, haces el cambio en fases.
+
+### El patrón expand-contract
+
+**Fase 1 — Expand**: agrega la nueva columna o tabla. El código viejo sigue funcionando con la columna vieja. El código nuevo escribe en ambas.
+
+**Fase 2 — Migrate**: copia los datos de la columna vieja a la nueva. Verifica que los datos estén completos.
+
+**Fase 3 — Contract**: elimina la columna vieja. En este punto, el código ya no la usa.
+
+Ejemplo concreto: quieres renombrar `sales_events.amount` a `sales_events.amount_original`.
+
+```text
+Hoy: columna 'amount'
+Expand: agrega 'amount_original', copia datos, código escribe en ambas
+Migrate: verifica que 'amount_original' tiene todos los datos
+Contract: elimina 'amount' cuando el código ya solo usa 'amount_original'
+```
+
+Cada fase es un deploy separado. Entre fases, la aplicación corre sin problema porque las columnas viejas siguen existiendo.
+
+### Por qué no hay down-migrations en Rush
+
+Una down-migration que borra una columna es irreversible si tiene datos. En producción, si algo sale mal y necesitas hacer rollback, no puedes deshacer el `DROP COLUMN`. Perderías datos.
+
+En Rush, el rollback es siempre hacer redeploy de la versión anterior del código, sin tocar el schema. La versión anterior del código puede convivir con el schema nuevo (expand) — simplemente ignora las columnas nuevas que no conoce.
+
+### Drizzle Kit y los archivos de migration
+
+```bash
+pnpm drizzle-kit generate
+```
+
+Este comando genera un archivo SQL en `drizzle/migrations/`. Ese archivo es lo que se aplica en producción:
+
+```bash
+pnpm drizzle-kit migrate
+```
+
+Los archivos de migration se commitean en git. Así puedes rastrear exactamente qué cambios de schema se aplicaron y cuándo.
+
+**Nunca borres** un archivo de migration ya aplicado en producción. Drizzle lleva un registro de qué migrations se aplicaron en la tabla `drizzle_migrations`.
+
+### Columnas NOT NULL en expand-contract
+
+Si agregas una columna `NOT NULL` sin valor default, la migration falla si hay filas existentes. Las opciones:
+
+1. Agrega con valor default: `ADD COLUMN new_col TEXT NOT NULL DEFAULT 'unknown'`
+2. Agrega como nullable, llena los datos, luego agrega el `NOT NULL`: tres pasos.
+
+```sql
+ALTER TABLE sales_events ADD COLUMN description TEXT;
+UPDATE sales_events SET description = 'Imported record' WHERE description IS NULL;
+ALTER TABLE sales_events ALTER COLUMN description SET NOT NULL;
+```
+
+Drizzle Kit genera esto correctamente si defines la columna con `.default('...')` en el schema.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Expand-contract: agregar columna sin downtime"
+  estimatedMinutes={35}
+  runnable={false}
+>
+
+Vas a agregar la columna `description` a `sales_events` usando el patrón expand-contract.
+
+### Paso 1: Expand — agregar la columna como nullable
+
+Actualiza el schema de Drizzle:
+
+```ts
+// src/db/schema/sales-events.ts
+description: text('description'),
+```
+
+Genera y aplica la migration:
+
+```bash
+pnpm drizzle-kit generate
+pnpm drizzle-kit migrate
+```
+
+El código actual sigue funcionando — la columna nueva es nullable y el código viejo simplemente no la llena.
+
+### Paso 2: Migrate — llenar los datos existentes
+
+En producción, esto sería un script de migración de datos. En el lab:
+
+```bash
+docker exec -it lab-pg psql -U postgres -d labdb \
+  -c "UPDATE sales_events SET description = 'Imported record' WHERE description IS NULL;"
+```
+
+### Paso 3: Contract — hacer la columna NOT NULL
+
+Actualiza el schema:
+
+```ts
+description: text('description').notNull().default(''),
+```
+
+Genera y aplica la migration:
+
+```bash
+pnpm drizzle-kit generate
+pnpm drizzle-kit migrate
+```
+
+### Verificación final
+
+```bash
+docker exec -it lab-pg psql -U postgres -d labdb \
+  -c "\d sales_events"
+```
+
+La columna `description` debe aparecer como `NOT NULL`.
+
+Verifica que el código sigue funcionando después de cada fase — no debe haber errores en el servidor.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Migrations sin down-migrations">
+
+1. ¿Por qué hacer `ALTER TABLE ... DROP COLUMN` directamente en producción es arriesgado?
+2. En el patrón expand-contract, ¿cuándo puedes hacer la Fase 3 (eliminar la columna vieja)?
+3. Si la migration falla a mitad de camino en producción, ¿qué debes hacer?
+
+- [ ] La columna `description` se agregó en dos fases sin eliminar nada del schema anterior.
+- [ ] Los archivos de migration están en `drizzle/migrations/` y están commiteados en git.
+- [ ] Puedes describir el plan de rollback si la Fase 2 (llenar datos) falla a mitad de camino.
+
+</Checkpoint>
+
+## Próxima unidad → [Módulos como capacidades del Business OS](../clean-arch-modulos/)

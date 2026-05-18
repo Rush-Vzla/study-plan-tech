@@ -1,0 +1,207 @@
+---
+title: "Consumir @rush/shared-schemas en el backend"
+description: Cómo importar schemas del paquete compartido, usarlos en pipes Zod de NestJS y manejar breaking changes de versión sin romper la app.
+sidebar:
+  order: 23
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/zod-validation-layers
+  - modulo-0/pnpm-monorepo
+learning_outcomes:
+  - Importar y usar schemas de @rush/shared-schemas en NestJS
+  - Manejar versiones del paquete sin breaking changes accidentales
+  - Entender qué schemas van en el paquete compartido y cuáles son locales
+  - Detectar breaking changes con changesets antes de publicar
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Rush tiene un paquete compartido, `@rush/shared-schemas`, que contiene los schemas Zod que tanto el backend como el frontend necesitan conocer. El schema de una venta, el schema de un business, el schema de una respuesta de error — esos van ahí.
+
+La razón de tener un paquete compartido: si el backend cambia el formato de una respuesta sin coordinar con el frontend, el frontend se rompe silenciosamente. Con un paquete compartido con semver, ese cambio es un breaking change explícito.
+
+### Qué va en shared-schemas
+
+**Sí va en shared-schemas**:
+
+- Schemas de request y response del API que el frontend consume
+- Tipos compartidos (enums de moneda, tipos de evento, estados de business)
+- Errores tipados que el frontend puede parsear
+
+**No va en shared-schemas**:
+
+- Schemas internos del backend (validaciones de use case que el frontend no ve)
+- Schemas de base de datos (Drizzle schema)
+- Schemas de configuración del servidor
+
+### Importar del paquete
+
+```ts
+// src/sales/sales.controller.ts
+import { createSaleRequestSchema, CreateSaleRequest } from '@rush/shared-schemas';
+import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+
+@Controller('sales')
+export class SalesController {
+  @Post(':businessId')
+  create(
+    @Param('businessId') businessId: string,
+    @Body(new ZodValidationPipe(createSaleRequestSchema)) dto: CreateSaleRequest,
+  ) {
+    return this.salesService.recordSale({ businessId, ...dto });
+  }
+}
+```
+
+El tipo `CreateSaleRequest` es inferido del schema — no hay que definirlo dos veces.
+
+### Manejar breaking changes
+
+Si el `createSaleRequestSchema` cambia de forma, todos los consumidores (backend y frontend) deben actualizarse. El flujo es:
+
+1. Hacer el cambio en el schema con un changeset que indica si es `major` (breaking) o `minor/patch`
+2. Publicar la nueva versión del paquete
+3. Actualizar los consumidores uno a uno
+
+```bash
+pnpm changeset
+```
+
+El CLI pregunta qué tipo de cambio es. Para un campo nuevo opcional: `minor`. Para renombrar un campo: `major`.
+
+### Versión pinneada en el backend
+
+```json
+{
+  "dependencies": {
+    "@rush/shared-schemas": "1.2.0"
+  }
+}
+```
+
+Versión exacta, sin `^`. Eso garantiza que un `pnpm update` accidental no actualiza automáticamente el paquete y rompe el backend.
+
+Para actualizar, es un cambio explícito de versión en `package.json` con un PR dedicado.
+
+### Compatibilidad hacia atrás
+
+Cuando agregas un campo al schema, agrégalo como opcional primero:
+
+```ts
+// En @rush/shared-schemas — cambio sin breaking
+export const createSaleRequestSchema = z.object({
+  amount: z.number().positive(),
+  currency: z.enum(['VES', 'USD']),
+  description: z.string().optional(),
+});
+```
+
+Todos los consumidores que no mandan `description` siguen funcionando. Cuando todos los consumidores estén actualizados, puedes hacerlo requerido en el siguiente major.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Simular @rush/shared-schemas con un paquete local"
+  estimatedMinutes={30}
+  runnable={false}
+>
+
+Como el paquete real está en el monorepo de Rush, vas a simular el paquete con un directorio local para el lab.
+
+### Paso 1: crear el paquete local
+
+```bash
+mkdir -p packages/shared-schemas/src
+cd packages/shared-schemas
+pnpm init
+```
+
+Edita el `package.json`:
+
+```json
+{
+  "name": "@rush/shared-schemas",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
+```
+
+### Paso 2: definir los schemas compartidos
+
+```ts
+// packages/shared-schemas/src/index.ts
+import { z } from 'zod';
+
+export const createSaleRequestSchema = z.object({
+  amount: z.number().positive().max(999_999_999),
+  currency: z.enum(['VES', 'USD']),
+  idempotencyKey: z.string().uuid(),
+});
+
+export type CreateSaleRequest = z.infer<typeof createSaleRequestSchema>;
+
+export const saleResponseSchema = z.object({
+  id: z.string().uuid(),
+  businessId: z.string().uuid(),
+  amount: z.string(),
+  currency: z.string(),
+  createdAt: z.string(),
+});
+
+export type SaleResponse = z.infer<typeof saleResponseSchema>;
+```
+
+### Paso 3: vincularlo al proyecto principal
+
+En el `package.json` del proyecto NestJS:
+
+```json
+{
+  "dependencies": {
+    "@rush/shared-schemas": "workspace:*"
+  }
+}
+```
+
+```bash
+pnpm install
+```
+
+### Paso 4: usar el schema en el controller
+
+Importa `createSaleRequestSchema` del paquete y úsalo en el pipe del controller.
+
+### Verificación final
+
+El controller valida el body con el schema del paquete compartido. Si cambias el schema en el paquete (por ejemplo, agregas un campo requerido), TypeScript en el controller se queja hasta que actualices el código del controller. Eso es el contrato funcionando.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Consumir @rush/shared-schemas en el backend">
+
+1. ¿Qué tipos de schemas van en `@rush/shared-schemas` y cuáles son locales al backend?
+2. ¿Por qué la versión del paquete va pinneada (sin `^`) en el `package.json` del backend?
+3. Si agregas un campo requerido al `createSaleRequestSchema` sin hacer un major release, ¿qué pasa con el frontend que ya no lo envía?
+
+- [ ] El controller usa el schema de `@rush/shared-schemas` — no define su propio schema duplicado.
+- [ ] Un cambio breaking en el schema del paquete hace que TypeScript se queje en el controller hasta que se actualice.
+- [ ] El tipo `CreateSaleRequest` se infiere del schema — no hay interfaz duplicada.
+
+</Checkpoint>
+
+Completaste las 23 unidades core del Track Backend. El siguiente paso es revisar que el build pase limpio.

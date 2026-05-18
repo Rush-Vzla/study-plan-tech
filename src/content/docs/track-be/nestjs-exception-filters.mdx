@@ -1,0 +1,288 @@
+---
+title: "Manejo de errores con estilo"
+description: Exception filters globales en NestJS para separar domain errors de HTTP errors y entregar respuestas de error consistentes.
+sidebar:
+  order: 3
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/nestjs-guards-pipes
+learning_outcomes:
+  - Crear exception filters globales en NestJS
+  - Separar domain errors de HTTP errors con clases propias
+  - Entregar respuestas de error con forma consistente en toda la API
+  - Loggear errores sin exponer stack traces al cliente
+last_updated: "2026-05-18"
+stack_versions:
+  nestjs: "11.x"
+  node: "24 LTS"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+En NestJS, cuando un handler lanza una excepción, el framework la atrapa y devuelve una respuesta HTTP. Pero la respuesta por defecto es fea e inconsistente. Los exception filters te permiten controlar exactamente qué forma tiene el error que llega al cliente.
+
+### Domain errors vs HTTP errors
+
+Fíjate en esta distinción importante: un error de dominio es "el negocio dice que esto no puede pasar". Un error HTTP es "el protocolo dice que esto falló". Son cosas distintas y no deberían mezclarse en el mismo lugar.
+
+```ts
+// src/common/errors/domain.error.ts
+export class DomainError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DomainError';
+  }
+}
+
+export class BusinessNotFoundError extends DomainError {
+  constructor(businessId: string) {
+    super('BUSINESS_NOT_FOUND', `Business ${businessId} not found`);
+  }
+}
+
+export class DuplicateIdempotencyKeyError extends DomainError {
+  constructor(key: string) {
+    super('DUPLICATE_IDEMPOTENCY_KEY', `Request with key ${key} already processed`);
+  }
+}
+```
+
+El service lanza `BusinessNotFoundError`. El exception filter lo convierte en un 404 HTTP. El controller no sabe nada de códigos HTTP — eso no es su trabajo.
+
+### Exception filter global
+
+```ts
+// src/common/filters/domain-exception.filter.ts
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Response } from 'express';
+import { DomainError } from '../errors/domain.error';
+
+const domainErrorStatusMap: Record<string, number> = {
+  BUSINESS_NOT_FOUND: HttpStatus.NOT_FOUND,
+  DUPLICATE_IDEMPOTENCY_KEY: HttpStatus.CONFLICT,
+  UNAUTHORIZED_OPERATION: HttpStatus.FORBIDDEN,
+};
+
+@Catch()
+export class GlobalExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalExceptionFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+
+    if (exception instanceof DomainError) {
+      const status = domainErrorStatusMap[exception.code] ?? HttpStatus.UNPROCESSABLE_ENTITY;
+      this.logger.warn(`DomainError: ${exception.code} — ${exception.message}`);
+      response.status(status).json({
+        error: exception.code,
+        message: exception.message,
+      });
+      return;
+    }
+
+    if (exception instanceof HttpException) {
+      response.status(exception.getStatus()).json({
+        error: 'HTTP_ERROR',
+        message: exception.message,
+      });
+      return;
+    }
+
+    this.logger.error('Unhandled exception', exception instanceof Error ? exception.stack : String(exception));
+    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      error: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred',
+    });
+  }
+}
+```
+
+Acá está el punto clave: el cliente nunca ve un stack trace. Solo ve el `code` y el `message`. El stack trace va al logger (que en producción va a Loki).
+
+### Registrar el filter globalmente
+
+```ts
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { GlobalExceptionFilter } from './common/filters/domain-exception.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.useGlobalFilters(new GlobalExceptionFilter());
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### Forma consistente de los errores
+
+Cuando tienes un filter global, todos los errores de la API tienen la misma forma:
+
+```json
+{
+  "error": "BUSINESS_NOT_FOUND",
+  "message": "Business biz-123 not found"
+}
+```
+
+Eso le facilita la vida al frontend — tiene una sola forma de error que parsear, sin importar el endpoint.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Domain errors + exception filter global"
+  estimatedMinutes={40}
+  runnable={false}
+>
+
+Vas a agregar domain errors y un exception filter global al proyecto del lab anterior.
+
+### Paso 1: crear las clases de error
+
+```ts
+// src/common/errors/domain.error.ts
+export class DomainError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DomainError';
+  }
+}
+
+export class SaleAmountTooLowError extends DomainError {
+  constructor(min: number) {
+    super('SALE_AMOUNT_TOO_LOW', `Sale amount must be at least ${min}`);
+  }
+}
+```
+
+### Paso 2: lanzar el error en el service
+
+```ts
+// src/sales/sales.service.ts
+import { Injectable } from '@nestjs/common';
+import { SaleAmountTooLowError } from '../common/errors/domain.error';
+
+const MIN_SALE_AMOUNT = 1;
+
+@Injectable()
+export class SalesService {
+  createSale(amount: number): { ok: boolean; amount: number } {
+    if (amount < MIN_SALE_AMOUNT) {
+      throw new SaleAmountTooLowError(MIN_SALE_AMOUNT);
+    }
+    return { ok: true, amount };
+  }
+}
+```
+
+### Paso 3: crear el exception filter
+
+Crea `src/common/filters/domain-exception.filter.ts` con el código del ejemplo de arriba (versión simplificada para el lab):
+
+```ts
+// src/common/filters/domain-exception.filter.ts
+import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus } from '@nestjs/common';
+import { Response } from 'express';
+import { DomainError } from '../errors/domain.error';
+
+@Catch()
+export class GlobalExceptionFilter implements ExceptionFilter {
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const response = host.switchToHttp().getResponse<Response>();
+
+    if (exception instanceof DomainError) {
+      response.status(HttpStatus.UNPROCESSABLE_ENTITY).json({
+        error: exception.code,
+        message: exception.message,
+      });
+      return;
+    }
+
+    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      error: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred',
+    });
+  }
+}
+```
+
+### Paso 4: registrar el filter en main.ts
+
+```ts
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { GlobalExceptionFilter } from './common/filters/domain-exception.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.useGlobalFilters(new GlobalExceptionFilter());
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### Verificación final
+
+Con monto válido:
+
+```bash
+curl -X POST http://localhost:3000/sales \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 100}'
+```
+
+Esperado: `{"ok":true,"amount":100}`.
+
+Con monto 0 (domain error):
+
+```bash
+curl -X POST http://localhost:3000/sales \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 0}'
+```
+
+Esperado: `{"error":"SALE_AMOUNT_TOO_LOW","message":"Sale amount must be at least 1"}` con status 422.
+
+El cliente nunca ve un stack trace. El error tiene siempre el mismo formato.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Manejo de errores con estilo">
+
+1. ¿Por qué los domain errors no deberían extender `HttpException` de NestJS directamente?
+2. ¿Qué problema hay si el controller decide qué código HTTP devolver en función de qué excepción lanzó el service?
+3. ¿Qué información nunca debería llegar al cliente en un error de producción y por qué?
+
+- [ ] El endpoint devuelve `{error: "SALE_AMOUNT_TOO_LOW", message: "..."}` con status 422 cuando el amount es menor que el mínimo.
+- [ ] El controller no tiene ningún try/catch — el filter global maneja todos los errores.
+- [ ] Puedes agregar un nuevo domain error y mapearlo a un código HTTP editando solo el filter, sin tocar el controller.
+
+</Checkpoint>
+
+## Próxima unidad → [Drizzle ORM: SQL-first de verdad](../drizzle-fundamentos/)

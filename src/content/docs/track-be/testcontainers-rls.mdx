@@ -1,0 +1,273 @@
+---
+title: "Testear RLS con Postgres real"
+description: Suite obligatoria con Testcontainers para verificar que la política RLS funciona — el test que demuestra que Tenant A no puede ver datos de Tenant B.
+sidebar:
+  order: 6
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 4
+prerequisites:
+  - track-be/rls-multi-tenant
+  - modulo-0/testing-filosofia
+learning_outcomes:
+  - Configurar Testcontainers con PostgreSQL para tests de integración
+  - Escribir tests que verifican el aislamiento de RLS entre tenants
+  - Entender por qué los mocks de base de datos no sirven para testear RLS
+  - Estructurar la suite de tests obligatorios de multi-tenancy
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Los tests de RLS no se pueden hacer con mocks. Un mock de base de datos no tiene políticas RLS — eso está en Postgres. Si mockeas la base de datos, estás testeando que tu código llama a los métodos correctos, pero no estás testeando que el aislamiento de datos funciona.
+
+Testcontainers te permite levantar un Postgres real dentro del test. La suite corre contra una base de datos real, con las políticas reales, y verifica que el aislamiento es efectivo.
+
+### La suite obligatoria de Rush
+
+Antes de cualquier deploy a producción, esta suite debe pasar:
+
+1. **Tenant A no puede leer datos de Tenant B** (debe devolver 0 filas)
+2. **Tenant B no puede leer datos de Tenant A** (debe devolver 0 filas)
+3. **Sin contexto de tenant, no hay datos** (debe devolver 0 filas)
+4. **Con contexto correcto, los datos son visibles** (debe devolver las filas del tenant)
+5. **Insertar datos de otro tenant debe fallar** (el `WITH CHECK` de la política debe rechazarlo)
+
+Fíjate que el test número 1 y 2 son la verificación más importante: demuestra que el aislamiento es bidireccional. No basta con verificar que cada tenant ve sus datos — hay que verificar que no ve los datos ajenos.
+
+### Setup con Testcontainers
+
+```ts
+// test/setup.ts
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from '../src/schema';
+
+let container: StartedPostgreSqlContainer;
+let pool: Pool;
+export let db: NodePgDatabase<typeof schema>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer('postgres:17').start();
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool, { schema });
+  await runMigrations(pool);
+  await setupRLS(pool);
+}, 60_000);
+
+afterAll(async () => {
+  await pool.end();
+  await container.stop();
+});
+```
+
+El timeout de 60 segundos es necesario porque Testcontainers tiene que descargar la imagen Docker la primera vez. En CI, con la imagen en caché, tarda mucho menos.
+
+### El patrón del test de aislamiento
+
+```ts
+// test/rls.test.ts
+describe('RLS tenant isolation', () => {
+  beforeEach(async () => {
+    await db.delete(schema.salesEvents);
+    await db.delete(schema.businesses);
+  });
+
+  it('Tenant A cannot read Tenant B data', async () => {
+    const [bizA] = await db.insert(schema.businesses)
+      .values({ name: 'Business A' }).returning();
+    const [bizB] = await db.insert(schema.businesses)
+      .values({ name: 'Business B' }).returning();
+
+    await db.insert(schema.salesEvents).values([
+      { businessId: bizA.id, amount: '100', currency: 'USD' },
+      { businessId: bizB.id, amount: '200', currency: 'USD' },
+    ]);
+
+    const salesFromA = await withTenant(pool, bizA.id, async (tx) => {
+      return tx.select().from(schema.salesEvents);
+    });
+
+    expect(salesFromA).toHaveLength(1);
+    expect(salesFromA[0].businessId).toBe(bizA.id);
+  });
+});
+```
+
+El test inserta datos de dos tenants usando el superuser (que tiene BYPASSRLS), y luego verifica el acceso usando el contexto de cada tenant. Si la política RLS está mal, el test falla y te dice exactamente cuál escenario falló.
+
+### Por qué este test es obligatorio antes de producción
+
+Imagínate que un dev cambia la política RLS por error — quizás hizo un refactor del schema y la política quedó mal escrita. Sin este test, ese error llega a producción y los datos de un tenant son visibles para otro. Con este test, el CI falla y el error se detecta antes del merge.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Suite de tests RLS con Testcontainers"
+  estimatedMinutes={70}
+  runnable={false}
+>
+
+Vas a escribir la suite de tests de aislamiento de RLS usando Testcontainers y Vitest.
+
+### Paso 1: instalar dependencias
+
+```bash
+pnpm add -D vitest @testcontainers/postgresql
+pnpm add drizzle-orm pg drizzle-kit
+```
+
+Configura `vitest.config.ts`:
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
+  },
+});
+```
+
+### Paso 2: función withTenant para tests
+
+```ts
+// test/helpers/with-tenant.ts
+import { Pool } from 'pg';
+import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { sql } from 'drizzle-orm';
+import * as schema from '../../src/schema';
+
+export async function withTenant<T>(
+  pool: Pool,
+  businessId: string,
+  fn: (db: NodePgDatabase<typeof schema>) => Promise<T>,
+): Promise<T> {
+  const db = drizzle(pool, { schema });
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL app.current_business_id = ${businessId}`);
+    return fn(tx as unknown as NodePgDatabase<typeof schema>);
+  });
+}
+```
+
+### Paso 3: escribir los tests de aislamiento
+
+```ts
+// test/rls-isolation.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { PostgreSqlContainer } from '@testcontainers/postgresql';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import * as schema from '../src/schema';
+import { withTenant } from './helpers/with-tenant';
+
+let pool: Pool;
+let db: ReturnType<typeof drizzle<typeof schema>>;
+
+beforeAll(async () => {
+  const container = await new PostgreSqlContainer('postgres:17').start();
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool, { schema });
+  await migrate(db, { migrationsFolder: './drizzle' });
+  await setupRLS(pool);
+}, 120_000);
+
+async function setupRLS(pool: Pool) {
+  const client = await pool.connect();
+  await client.query(`
+    ALTER TABLE sales_events ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation ON sales_events;
+    CREATE POLICY tenant_isolation ON sales_events
+      USING (business_id = current_setting('app.current_business_id', true)::uuid)
+      WITH CHECK (business_id = current_setting('app.current_business_id', true)::uuid);
+  `);
+  client.release();
+}
+
+beforeEach(async () => {
+  await db.delete(schema.salesEvents);
+  await db.delete(schema.businesses);
+});
+
+describe('RLS tenant isolation', () => {
+  it('Tenant A sees only its own sales', async () => {
+    const [bizA] = await db.insert(schema.businesses).values({ name: 'A' }).returning();
+    const [bizB] = await db.insert(schema.businesses).values({ name: 'B' }).returning();
+    await db.insert(schema.salesEvents).values([
+      { businessId: bizA.id, amount: '100', currency: 'USD' },
+      { businessId: bizB.id, amount: '200', currency: 'USD' },
+    ]);
+
+    const result = await withTenant(pool, bizA.id, (tx) =>
+      tx.select().from(schema.salesEvents),
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].businessId).toBe(bizA.id);
+  });
+
+  it('Without tenant context, no rows are visible', async () => {
+    const [biz] = await db.insert(schema.businesses).values({ name: 'A' }).returning();
+    await db.insert(schema.salesEvents).values({ businessId: biz.id, amount: '100', currency: 'USD' });
+
+    const client = await pool.connect();
+    const res = await client.query('SELECT * FROM sales_events');
+    client.release();
+
+    expect(res.rows).toHaveLength(0);
+  });
+
+  it('Tenant A cannot read Tenant B data', async () => {
+    const [bizA] = await db.insert(schema.businesses).values({ name: 'A' }).returning();
+    const [bizB] = await db.insert(schema.businesses).values({ name: 'B' }).returning();
+    await db.insert(schema.salesEvents).values({ businessId: bizB.id, amount: '200', currency: 'USD' });
+
+    const result = await withTenant(pool, bizA.id, (tx) =>
+      tx.select().from(schema.salesEvents),
+    );
+
+    expect(result).toHaveLength(0);
+  });
+});
+```
+
+### Verificación final
+
+```bash
+pnpm vitest run
+```
+
+Los 3 tests deben pasar. Si falla el segundo ("Without tenant context"), verifica que la conexión sin `SET app.current_business_id` efectivamente está usando `app_user` (no superuser, que tiene BYPASSRLS).
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Testear RLS con Postgres real">
+
+1. ¿Por qué no puedes testear RLS con un mock de base de datos?
+2. ¿Cuál es el riesgo de que el user de app tenga el atributo `BYPASSRLS` activo durante los tests?
+3. Si el test "Tenant A cannot read Tenant B data" pasa en local pero falla en CI, ¿cuál sería la causa más probable?
+
+- [ ] Los 3 tests de aislamiento pasan con Testcontainers + Postgres 17 real.
+- [ ] El test que verifica acceso sin contexto de tenant devuelve 0 filas.
+- [ ] Puedes explicar por qué el INSERT como superuser (BYPASSRLS) se usa solo en el setup de los tests, nunca en el código de producción.
+
+</Checkpoint>
+
+## Próxima unidad → [Append-only: el historial que no miente](../append-only-eventos/)

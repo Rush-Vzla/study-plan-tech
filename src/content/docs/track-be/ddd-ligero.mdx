@@ -1,0 +1,216 @@
+---
+title: "DDD sin overengineering"
+description: Value objects (Money), domain errors y policies en Rush — sin aggregate roots complejos. El 80% del backend es insert + snapshot.
+sidebar:
+  order: 18
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 3
+prerequisites:
+  - track-be/clean-arch-modulos
+  - track-be/doble-moneda
+learning_outcomes:
+  - Crear value objects inmutables como Money para encapsular validaciones monetarias
+  - Implementar domain policies como funciones puras
+  - Entender cuándo DDD agrega valor y cuándo es overengineering
+  - Aplicar el patrón insert + snapshot para el 80% de los casos de Rush
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Domain-Driven Design tiene herramientas útiles, pero no todas aplican a Rush. Los aggregate roots complejos con invariantes sofisticadas — eso es overengineering para un sistema donde el 80% de las operaciones son "insertar un evento" + "calcular un snapshot".
+
+Lo que sí aplica en Rush: value objects, domain errors y policies. Esas tres cosas.
+
+### Value objects: inmutabilidad garantizada
+
+Un value object encapsula un concepto del dominio con sus validaciones. No tiene identidad propia — dos value objects con los mismos datos son iguales.
+
+```ts
+// src/sales/domain/money.vo.ts
+export class Money {
+  private constructor(
+    public readonly amount: number,
+    public readonly currency: 'VES' | 'USD',
+  ) {}
+
+  static of(amount: number, currency: 'VES' | 'USD'): Money {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new InvalidMoneyError(amount);
+    }
+    if (amount > 999_999_999) {
+      throw new MoneyAmountTooLargeError(amount);
+    }
+    return new Money(amount, currency);
+  }
+
+  add(other: Money): Money {
+    if (this.currency !== other.currency) {
+      throw new MixedCurrencyError(this.currency, other.currency);
+    }
+    return Money.of(this.amount + other.amount, this.currency);
+  }
+
+  toRecord(): { amount: string; currency: string } {
+    return { amount: this.amount.toFixed(4), currency: this.currency };
+  }
+}
+```
+
+El constructor es privado — la única manera de crear un `Money` es por `Money.of()`, que valida. Nadie puede crear un `Money` con monto negativo ni con moneda inválida.
+
+### Domain policies como funciones puras
+
+Una policy es una regla de negocio que puede cambiar. En Rush, las policies son funciones puras — no modifican estado, solo evalúan si una condición se cumple.
+
+```ts
+// src/sales/domain/sales.policies.ts
+export function canRecordSale(params: {
+  businessStatus: 'active' | 'suspended' | 'onboarding';
+}): { allowed: boolean; reason?: string } {
+  if (params.businessStatus === 'suspended') {
+    return { allowed: false, reason: 'Business is suspended' };
+  }
+  if (params.businessStatus === 'onboarding') {
+    return { allowed: false, reason: 'Business has not completed onboarding' };
+  }
+  return { allowed: true };
+}
+```
+
+El service llama a la policy antes de proceder:
+
+```ts
+const policy = canRecordSale({ businessStatus: business.status });
+if (!policy.allowed) {
+  throw new DomainError('SALE_NOT_ALLOWED', policy.reason!);
+}
+```
+
+### El patrón insert + snapshot
+
+El 80% de las operaciones en Rush siguen el mismo patrón:
+
+1. Validar con el value object y la policy
+2. Insertar el evento en la tabla append-only
+3. El snapshot (KPI) se recalcula en batch, no en tiempo real
+
+No hay aggregate roots complejos con `save()` y `load()`. No hay event sourcing completo. Es un sistema OLTP simple con eventos append-only.
+
+### Cuándo NO usar DDD completo
+
+Si el flujo es: validar → insertar fila → devolver respuesta, no necesitas aggregate roots. El aggregate root es útil cuando tienes invariantes que abarcan varias entidades y necesitas aplicarlas atómicamente. En Rush, ese caso es raro — la mayoría de las operaciones son sobre un solo evento a la vez.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Money value object + policy de ventas"
+  estimatedMinutes={45}
+  runnable={false}
+>
+
+Vas a implementar el value object `Money` y una policy de ventas, y usarlos en el service.
+
+### Paso 1: crear los domain errors
+
+```ts
+// src/sales/domain/sales.errors.ts
+import { DomainError } from '../../common/errors/domain.error';
+
+export class InvalidMoneyError extends DomainError {
+  constructor(amount: number) {
+    super('INVALID_MONEY', `Amount ${amount} is not valid`);
+  }
+}
+
+export class MixedCurrencyError extends DomainError {
+  constructor(a: string, b: string) {
+    super('MIXED_CURRENCY', `Cannot add ${a} and ${b}`);
+  }
+}
+```
+
+### Paso 2: implementar el value object Money
+
+Crea `src/sales/domain/money.vo.ts` con el código del ejemplo.
+
+### Paso 3: implementar la policy
+
+Crea `src/sales/domain/sales.policies.ts` con `canRecordSale`.
+
+### Paso 4: actualizar el service
+
+```ts
+// src/sales/sales.service.ts
+async recordSale(businessId: string, amount: number, currency: 'VES' | 'USD', businessStatus: 'active' | 'suspended' | 'onboarding') {
+  const policy = canRecordSale({ businessStatus });
+  if (!policy.allowed) {
+    throw new SaleNotAllowedError(policy.reason!);
+  }
+
+  const money = Money.of(amount, currency);
+
+  return this.repo.insert(businessId, money.toRecord().amount, money.toRecord().currency);
+}
+```
+
+### Paso 5: tests unitarios del value object
+
+```ts
+// test/sales/money.vo.spec.ts
+import { Money } from '../../src/sales/domain/money.vo';
+import { InvalidMoneyError } from '../../src/sales/domain/sales.errors';
+
+describe('Money', () => {
+  it('creates valid money', () => {
+    const m = Money.of(100, 'USD');
+    expect(m.amount).toBe(100);
+    expect(m.currency).toBe('USD');
+  });
+
+  it('throws on negative amount', () => {
+    expect(() => Money.of(-1, 'USD')).toThrow(InvalidMoneyError);
+  });
+
+  it('adds two amounts of same currency', () => {
+    const result = Money.of(100, 'USD').add(Money.of(50, 'USD'));
+    expect(result.amount).toBe(150);
+  });
+});
+```
+
+### Verificación final
+
+```bash
+pnpm vitest run test/sales/money.vo.spec.ts
+```
+
+Los 3 tests deben pasar. El value object `Money` no tiene imports de NestJS ni de Drizzle — es puro TypeScript.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="DDD sin overengineering">
+
+1. ¿Por qué el constructor de `Money` es privado y la creación es por `Money.of()`?
+2. ¿Qué es una "policy" en DDD y por qué es una función pura en vez de un método del service?
+3. En Rush, ¿cuándo tiene sentido usar un aggregate root y cuándo es overengineering?
+
+- [ ] El value object `Money` no puede crearse con monto negativo — `Money.of(-1, 'USD')` lanza error.
+- [ ] La policy `canRecordSale` es una función pura que no tiene side effects ni imports de frameworks.
+- [ ] Los tests del value object pasan sin necesitar un módulo de NestJS ni una base de datos.
+
+</Checkpoint>
+
+## Próxima unidad → [KPI snapshots: escalar el cálculo de métricas](../kpi-snapshots/)

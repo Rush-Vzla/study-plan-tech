@@ -1,0 +1,227 @@
+---
+title: "KPI snapshots: escalar el cálculo de métricas"
+description: Materialización diaria de KPIs en kpi_snapshots con kpi_formula_versions — cómo Rush pre-calcula tendencias para que el dashboard cargue rápido sin matar la base de datos.
+sidebar:
+  order: 19
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 3
+prerequisites:
+  - track-be/append-only-eventos
+  - track-be/redis-bullmq
+learning_outcomes:
+  - Entender por qué calcular KPIs en tiempo real no escala
+  - Diseñar la tabla kpi_snapshots para materialización diaria
+  - Implementar el job de cálculo con BullMQ
+  - Usar kpi_formula_versions para rastrear cambios de fórmulas
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  drizzle: "0.x"
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Calcular el total de ventas del mes en tiempo real sumando miles de eventos cada vez que alguien abre el dashboard es una mala idea. Con 1.000 tenants y un dashboard que hace 5 queries de KPI cada carga, eso son 5.000 queries de aggregation por carga. La base de datos colapsa.
+
+La solución: calcular los KPIs una vez al día (o cuando haya un cambio significativo) y guardarlos en una tabla de snapshots. El dashboard lee el snapshot — una sola query con índice.
+
+### El schema de kpi_snapshots
+
+```ts
+// src/db/schema/kpi-snapshots.ts
+import { pgTable, uuid, text, numeric, date, timestamp, jsonb, unique } from 'drizzle-orm/pg-core';
+
+export const kpiSnapshots = pgTable(
+  'kpi_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    businessId: uuid('business_id').notNull(),
+    kpiKey: text('kpi_key').notNull(),
+    value: numeric('value', { precision: 19, scale: 4 }).notNull(),
+    currency: text('currency'),
+    period: text('period').notNull(),
+    snapshotDate: date('snapshot_date').notNull(),
+    formulaVersion: text('formula_version').notNull().default('v1'),
+    metadata: jsonb('metadata'),
+    calculatedAt: timestamp('calculated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('kpi_snapshots_unique').on(table.businessId, table.kpiKey, table.snapshotDate, table.period),
+  ],
+);
+```
+
+El `UNIQUE (business_id, kpi_key, snapshot_date, period)` previene duplicados. Si el cálculo corre dos veces para el mismo día, el segundo usa `INSERT ... ON CONFLICT DO UPDATE` para actualizar el snapshot existente.
+
+### El kpi_key y el period
+
+`kpi_key` identifica el KPI: `'total_sales'`, `'total_costs'`, `'gross_margin'`. `period` identifica el rango: `'daily'`, `'weekly'`, `'monthly'`.
+
+Así puedes tener un snapshot diario, uno semanal y uno mensual del mismo KPI para el mismo business.
+
+### El job de materialización
+
+```ts
+// src/kpi/kpi-snapshot.job.ts
+import { Injectable } from '@nestjs/common';
+import { DrizzleService } from '../drizzle/drizzle.service';
+import { kpiSnapshots } from '../db/schema/kpi-snapshots';
+import { salesEvents } from '../db/schema/sales-events';
+import { eq, and, gte, lte, sql } from 'drizzle-orm';
+
+@Injectable()
+export class KpiSnapshotJob {
+  constructor(private readonly drizzle: DrizzleService) {}
+
+  async calculateDailySales(businessId: string, date: Date) {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const [result] = await this.drizzle.db
+      .select({ total: sql<string>`COALESCE(SUM(amount::numeric), 0)` })
+      .from(salesEvents)
+      .where(
+        and(
+          eq(salesEvents.businessId, businessId),
+          gte(salesEvents.createdAt, startOfDay),
+          lte(salesEvents.createdAt, endOfDay),
+        ),
+      );
+
+    const snapshotDate = date.toISOString().split('T')[0];
+
+    await this.drizzle.db
+      .insert(kpiSnapshots)
+      .values({
+        businessId,
+        kpiKey: 'total_sales',
+        value: result.total,
+        currency: 'USD',
+        period: 'daily',
+        snapshotDate,
+        formulaVersion: 'v1',
+      })
+      .onConflictDoUpdate({
+        target: [kpiSnapshots.businessId, kpiSnapshots.kpiKey, kpiSnapshots.snapshotDate, kpiSnapshots.period],
+        set: { value: result.total, calculatedAt: new Date() },
+      });
+  }
+}
+```
+
+### kpi_formula_versions: rastrear cambios de fórmulas
+
+Si la fórmula de un KPI cambia, los snapshots calculados con la fórmula vieja son inconsistentes con los nuevos. La tabla `kpi_formula_versions` registra qué fórmula estaba vigente en cada período:
+
+```ts
+export const kpiFormulaVersions = pgTable('kpi_formula_versions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  kpiKey: text('kpi_key').notNull(),
+  version: text('version').notNull(),
+  description: text('description').notNull(),
+  effectiveFrom: date('effective_from').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+```
+
+Cuando cambias la fórmula, insertas una nueva versión y recalculas los snapshots históricos con ella.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Snapshot de ventas diarias con BullMQ"
+  estimatedMinutes={50}
+  runnable={false}
+>
+
+Vas a crear el job de materialización de snapshots y verificar que el dashboard puede leer el resultado sin queries de aggregation en tiempo real.
+
+### Paso 1: crear las tablas
+
+Agrega los schemas de `kpi_snapshots` y `kpi_formula_versions` y genera las migrations.
+
+### Paso 2: implementar el job
+
+Crea `src/kpi/kpi-snapshot.job.ts` con el código del ejemplo.
+
+### Paso 3: encolar el job con BullMQ
+
+```ts
+// src/kpi/kpi.service.ts
+import { Queue } from 'bullmq';
+
+const kpiQueue = new Queue('kpi-snapshots', { connection: redisConnection });
+
+async function scheduleSnapshotForAllBusinesses() {
+  const businesses = await db.select({ id: businessesTable.id }).from(businessesTable);
+  for (const biz of businesses) {
+    await kpiQueue.add('calculate-daily', {
+      businessId: biz.id,
+      date: new Date().toISOString(),
+    });
+  }
+}
+```
+
+### Paso 4: endpoint de KPI que lee el snapshot
+
+```ts
+// src/kpi/kpi.controller.ts
+@Get(':businessId/total-sales')
+async getDailySales(
+  @Param('businessId') businessId: string,
+  @Query('date') date: string,
+) {
+  const [snapshot] = await this.drizzle.db
+    .select()
+    .from(kpiSnapshots)
+    .where(
+      and(
+        eq(kpiSnapshots.businessId, businessId),
+        eq(kpiSnapshots.kpiKey, 'total_sales'),
+        eq(kpiSnapshots.snapshotDate, date),
+        eq(kpiSnapshots.period, 'daily'),
+      ),
+    );
+
+  return snapshot ?? { value: '0', currency: 'USD' };
+}
+```
+
+### Verificación final
+
+Registra algunas ventas. Ejecuta el job manualmente. Consulta el endpoint de KPI:
+
+```bash
+curl "http://localhost:3000/kpi/biz-123/total-sales?date=2026-05-18"
+```
+
+La respuesta debe ser el snapshot — una sola fila, sin aggregation en tiempo real.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="KPI snapshots: escalar el cálculo de métricas">
+
+1. ¿Qué problema concreto resuelve materializar los KPIs en un snapshot versus calcularlos en tiempo real?
+2. ¿Por qué el constraint UNIQUE de `kpi_snapshots` tiene cuatro columnas y no solo `(business_id, kpi_key)`?
+3. Si la fórmula de un KPI cambia, ¿qué pasos deberías seguir para mantener consistencia en los snapshots históricos?
+
+- [ ] El snapshot existe en `kpi_snapshots` después de ejecutar el job — la query del dashboard lee 1 fila, no miles de eventos.
+- [ ] El `ON CONFLICT DO UPDATE` actualiza el snapshot si el job corre dos veces para el mismo día.
+- [ ] Puedes agregar una nueva fórmula en `kpi_formula_versions` sin romper los snapshots existentes.
+
+</Checkpoint>
+
+## Próxima unidad → [Rate limiting jerárquico](../rate-limiting/)

@@ -1,0 +1,202 @@
+---
+title: "Pino: logs estructurados que no filtran datos"
+description: Cómo configurar Pino en NestJS para emitir JSON estructurado que va a Loki — con sanitización para nunca loggear montos, RIF, tokens ni teléfonos.
+sidebar:
+  order: 22
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 2
+prerequisites:
+  - track-be/nestjs-fundamentos
+  - modulo-0/observabilidad-concepto
+learning_outcomes:
+  - Configurar Pino como logger de NestJS con nestjs-pino
+  - Emitir logs JSON estructurados con request ID y context
+  - Sanitizar logs para no filtrar datos sensibles
+  - Entender qué logs van a Loki y cómo se consultan
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Los logs de texto plano (`console.log("Sale recorded: " + amount)`) no escalan en producción. No puedes filtrarlos por tenant, no puedes hacer queries sobre ellos, y si alguien loggea un monto o un RIF, tienes un problema de privacidad.
+
+Pino emite JSON estructurado. Cada log es un objeto con campos consistentes. Loki puede indexar esos campos y permitirte queries como: "dame todos los logs de error del tenant X en los últimos 30 minutos".
+
+### Configurar Pino con NestJS
+
+```bash
+pnpm add nestjs-pino pino-http pino-pretty
+```
+
+```ts
+// src/app.module.ts
+import { LoggerModule } from 'nestjs-pino';
+
+@Module({
+  imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env['NODE_ENV'] === 'production' ? 'info' : 'debug',
+        transport: process.env['NODE_ENV'] !== 'production'
+          ? { target: 'pino-pretty', options: { colorize: true } }
+          : undefined,
+        serializers: {
+          req: (req) => ({
+            method: req.method,
+            url: req.url,
+            requestId: req.id,
+          }),
+          res: (res) => ({
+            statusCode: res.statusCode,
+          }),
+        },
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+`pino-pretty` es solo para desarrollo — en producción emites JSON crudo que Loki puede indexar directamente.
+
+### Logs estructurados en el service
+
+```ts
+// src/sales/sales.service.ts
+import { Injectable, Logger } from '@nestjs/common';
+
+@Injectable()
+export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
+  async recordSale(params: RecordSaleParams) {
+    this.logger.log({
+      msg: 'Recording sale',
+      businessId: params.businessId,
+      currency: params.currency,
+    });
+
+    const event = await this.repo.insert(/*...*/);
+
+    this.logger.log({
+      msg: 'Sale recorded',
+      businessId: params.businessId,
+      eventId: event.id,
+    });
+
+    return event;
+  }
+}
+```
+
+Fíjate en lo que NO está en los logs: el `amount`. Los montos de ventas son datos financieros sensibles. Si los logs de Pino van a Loki y Loki tiene acceso de lectura más amplio que la base de datos, tienes una filtración.
+
+### Qué nunca va en los logs
+
+| Dato | Razón |
+|------|-------|
+| Montos de ventas y costos | Datos financieros |
+| RIF del business | Identificador fiscal privado |
+| Tokens y passwords | Credenciales |
+| Teléfonos y emails | PII |
+| Datos de tarjetas | PCI |
+
+Si necesitas debug de un monto en particular, hazlo con un script de auditoría contra la base de datos directamente — no a través de los logs.
+
+### Sanitización automática
+
+Puedes configurar un serializer que omita campos sensibles automáticamente:
+
+```ts
+function sanitizeBody(body: Record<string, unknown>): Record<string, unknown> {
+  const sensitiveFields = ['password', 'token', 'amount', 'rif', 'phone', 'email'];
+  return Object.fromEntries(
+    Object.entries(body).map(([key, value]) => [
+      key,
+      sensitiveFields.includes(key) ? '[REDACTED]' : value,
+    ]),
+  );
+}
+```
+
+Aplícalo en el serializer del request de Pino para que nunca llegue a Loki.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Pino + nestjs-pino con sanitización"
+  estimatedMinutes={35}
+  runnable={false}
+>
+
+Vas a reemplazar el `console.log` del proyecto con Pino y verificar que los campos sensibles no aparecen en los logs.
+
+### Paso 1: instalar y configurar
+
+```bash
+pnpm add nestjs-pino pino-http pino-pretty
+```
+
+Agrega `LoggerModule.forRoot(...)` a `AppModule` con la config del ejemplo.
+
+### Paso 2: usar el Logger de NestJS en los services
+
+Reemplaza cualquier `console.log` en los services por `this.logger.log({...})` con campos estructurados (sin montos).
+
+### Paso 3: agregar el serializer de sanitización
+
+```ts
+// src/common/pino/sanitize.ts
+const SENSITIVE_FIELDS = ['password', 'token', 'amount', 'rif', 'phone'];
+
+export function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [
+      k,
+      SENSITIVE_FIELDS.includes(k) ? '[REDACTED]' : v,
+    ]),
+  );
+}
+```
+
+Agrega el serializer al `pinoHttp` config.
+
+### Verificación final
+
+Haz una venta con monto:
+
+```bash
+curl -X POST http://localhost:3000/sales/biz-123 \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 100, "currency": "USD"}'
+```
+
+Revisa los logs del servidor. El log debe mostrar `businessId`, `eventId`, `currency` — pero NO el `amount`. Si ves el monto en los logs, la sanitización no está funcionando.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Pino: logs estructurados que no filtran datos">
+
+1. ¿Por qué un log de texto plano es menos útil que un log JSON estructurado en producción?
+2. ¿Por qué los montos de ventas no van en los logs aunque sean importantes para debug?
+3. ¿Cómo configurarías el log level para que en producción solo se emitan `info` y `error`, pero en desarrollo también `debug`?
+
+- [ ] Los logs del servidor son JSON con campos estructurados — puedes filtrarlos por `businessId`.
+- [ ] El campo `amount` aparece como `[REDACTED]` en los logs, no con el valor real.
+- [ ] En desarrollo se ve pretty-print coloreado. En producción (NODE_ENV=production) se ve JSON crudo.
+
+</Checkpoint>
+
+## Próxima unidad → [Consumir `@rush/shared-schemas` en el backend](../shared-schemas-consumo/)

@@ -1,0 +1,229 @@
+---
+title: "Redis + BullMQ: jobs en background"
+description: Queue de jobs con retries y dead letter queue usando BullMQ sobre Redis — para OTPs, emails, rate limiting y tareas asincrónicas en Rush.
+sidebar:
+  order: 13
+track: track-be
+unit_type: lectura-lab-checkpoint
+tags: [obligatorio, track-be]
+estimated_hours: 4
+prerequisites:
+  - track-be/nestjs-fundamentos
+  - track-be/step-up-auth
+learning_outcomes:
+  - Configurar BullMQ con NestJS para procesar jobs en background
+  - Implementar retries con backoff exponencial y dead letter queue
+  - Usar Redis para rate limiting distribuido
+  - Entender cuándo un job debe ir a la dead letter queue
+last_updated: "2026-05-18"
+stack_versions:
+  node: "24 LTS"
+  nestjs: "11.x"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+Algunos procesos no deben ejecutarse en el mismo request HTTP que los disparó. Si el envío de un email tarda 2 segundos, no tiene sentido hacerlo esperar al usuario. Si un cálculo de KPI tarda 30 segundos, definitivamente no va en el request.
+
+BullMQ es la librería de queue que usa Rush para esto. Funciona sobre Redis — los jobs se guardan en Redis y un worker los procesa en background.
+
+### Cuándo usar un job vs hacer el trabajo directo
+
+| Situación | Directo en request | Job en BullMQ |
+|-----------|--------------------|----|
+| Query rápida (&lt;100ms) | ✓ | No necesario |
+| Envío de email | No | ✓ |
+| Cálculo de KPI | No | ✓ |
+| Notificación push | No | ✓ |
+| Webhook a sistema externo | No | ✓ |
+
+### Configurar BullMQ en NestJS
+
+```ts
+// src/queues/email.queue.ts
+import { Queue } from 'bullmq';
+import Redis from 'ioredis';
+
+const connection = new Redis({ host: 'localhost', port: 6379 });
+
+export const emailQueue = new Queue('email', {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 1000 },
+    removeOnComplete: { count: 100 },
+    removeOnFail: false,
+  },
+});
+```
+
+`attempts: 3` — el job se reintenta hasta 3 veces si falla. `backoff: exponential` — espera 1s, luego 2s, luego 4s entre intentos. `removeOnFail: false` — los jobs fallidos quedan en la dead letter queue (una queue de Redis para jobs que agotaron sus reintentos).
+
+### El worker
+
+```ts
+// src/workers/email.worker.ts
+import { Worker } from 'bullmq';
+import Redis from 'ioredis';
+
+const connection = new Redis({ host: 'localhost', port: 6379 });
+
+const emailWorker = new Worker(
+  'email',
+  async (job) => {
+    const { to, subject, body } = job.data as { to: string; subject: string; body: string };
+    await sendEmail({ to, subject, body });
+  },
+  {
+    connection,
+    concurrency: 5,
+  },
+);
+
+emailWorker.on('failed', (job, err) => {
+  console.error(`Email job ${job?.id} failed:`, err.message);
+});
+```
+
+`concurrency: 5` — el worker procesa hasta 5 jobs en paralelo. Ajusta según los límites de tu proveedor de email.
+
+### Encolar un job
+
+```ts
+// src/auth/auth.service.ts
+async sendVerificationEmail(email: string, token: string) {
+  await emailQueue.add('send-verification', {
+    to: email,
+    subject: 'Verifica tu cuenta en Rush',
+    body: `Tu link de verificación: https://app.rush.io/verify?token=${token}`,
+  });
+}
+```
+
+El request HTTP responde inmediatamente. El email se envía en background.
+
+### Rate limiting con Redis
+
+Redis también sirve para rate limiting distribuido — funciona en múltiples instancias del API porque el contador vive en Redis, no en memoria de un solo proceso.
+
+```ts
+// src/common/guards/rate-limit.guard.ts
+import { Injectable, CanActivate, ExecutionContext, TooManyRequestsException } from '@nestjs/common';
+import Redis from 'ioredis';
+
+const WINDOW_SECONDS = 60;
+const MAX_REQUESTS = 100;
+
+@Injectable()
+export class RateLimitGuard implements CanActivate {
+  constructor(private readonly redis: Redis) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<{ ip: string }>();
+    const key = `rate:${req.ip}`;
+
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      await this.redis.expire(key, WINDOW_SECONDS);
+    }
+
+    if (count > MAX_REQUESTS) {
+      throw new TooManyRequestsException('Too many requests — try again in a minute');
+    }
+
+    return true;
+  }
+}
+```
+
+### Dead letter queue — qué hacer con jobs fallidos
+
+Un job que falla 3 veces sin éxito queda en la dead letter queue. En Rush, hay un dashboard interno (BullMQ Bull Board) donde el equipo puede ver los jobs fallidos, revisar el error y decidir si re-encolarlos o descartarlos.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Queue de emails con BullMQ + retry + dead letter"
+  estimatedMinutes={65}
+  runnable={false}
+>
+
+Vas a crear una queue de emails con BullMQ, un worker con retries y verificar que los jobs fallidos van a la DLQ.
+
+### Paso 1: instalar dependencias
+
+```bash
+pnpm add bullmq ioredis
+```
+
+### Paso 2: crear la queue y el worker
+
+Crea `src/queues/email.queue.ts` y `src/workers/email.worker.ts` con el código del ejemplo.
+
+### Paso 3: simular un servicio de email que falla
+
+```ts
+// src/services/email.service.ts
+let callCount = 0;
+
+export async function sendEmail(opts: { to: string; subject: string; body: string }) {
+  callCount++;
+  if (callCount <= 2) {
+    throw new Error(`Email service unavailable (attempt ${callCount})`);
+  }
+  console.log(`Email sent to ${opts.to}: ${opts.subject}`);
+}
+```
+
+El servicio falla en las dos primeras llamadas y tiene éxito en la tercera — así pruebas el retry.
+
+### Paso 4: agregar un job y observar los retries
+
+```ts
+// src/main.ts (temporal para el lab)
+import { emailQueue } from './queues/email.queue';
+import './workers/email.worker';
+
+await emailQueue.add('send-welcome', {
+  to: 'user@example.com',
+  subject: 'Bienvenido a Rush',
+  body: 'Tu cuenta está lista.',
+});
+```
+
+### Verificación final
+
+Ejecuta el proyecto y observa los logs. Debes ver:
+
+- Intento 1: falla
+- Intento 2: falla (backoff)
+- Intento 3: `Email sent to user@example.com`
+
+Modifica `sendEmail` para que siempre falle. Después de 3 intentos, el job debe aparecer en la dead letter queue. Verifica con:
+
+```bash
+docker exec -it lab-redis redis-cli LRANGE bull:email:failed 0 -1
+```
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="Redis + BullMQ: jobs en background">
+
+1. ¿Por qué el backoff exponencial es mejor que un retry inmediato cuando un servicio externo falla?
+2. ¿Qué diferencia hay entre `removeOnFail: false` y `removeOnFail: true` en la configuración de BullMQ?
+3. Si tienes 10 instancias del API corriendo y usas rate limiting en memoria (no Redis), ¿qué problema ocurre?
+
+- [ ] El worker procesa el job de email después de 2 fallos (3er intento exitoso).
+- [ ] Los jobs que agotaron sus 3 intentos aparecen en la dead letter queue de Redis.
+- [ ] El rate limiting con Redis funciona si correras 2 instancias del API — el contador es compartido.
+
+</Checkpoint>
+
+## Próxima unidad → [Audit log inmutable con hash chain](../audit-log-hash-chain/)
