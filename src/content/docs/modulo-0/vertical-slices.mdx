@@ -1,0 +1,280 @@
+---
+title: "Screaming Architecture: que el código grite el negocio"
+description: Módulos como capacidades del negocio — carpetas por dominio, no por tipo técnico.
+sidebar:
+  order: 8
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 2
+prerequisites: ["modulo-0/clean-arch-pragmatica"]
+learning_outcomes:
+  - Entender qué significa que la arquitectura "grite" el negocio
+  - Organizar carpetas por capacidad de negocio, no por tipo técnico
+  - Aplicar vertical slices en el contexto de Rush
+  - Reconocer los límites entre módulos de negocio
+last_updated: "2026-05-17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={2} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+Robert C. Martin (Uncle Bob) lo explicó así: cuando entras al plano de un edificio, sabes inmediatamente si es una iglesia, una casa o una fábrica — la arquitectura lo grita. Con el código debería pasar lo mismo. Si abres la carpeta raíz de un proyecto y ves `controllers/`, `services/`, `repositories/`, no sabes de qué trata el negocio. Si ves `sales/`, `onboarding/`, `health-score/`, lo sabes de inmediato.
+
+Eso es Screaming Architecture, y en Rush lo aplicamos como vertical slices.
+
+### Organización técnica vs organización por dominio
+
+```text
+// MAL — organización técnica
+src/
+├── controllers/
+│   ├── sales.controller.ts
+│   ├── users.controller.ts
+│   └── inventory.controller.ts
+├── services/
+│   ├── sales.service.ts
+│   ├── users.service.ts
+│   └── inventory.service.ts
+└── repositories/
+    ├── sales.repository.ts
+    ├── users.repository.ts
+    └── inventory.repository.ts
+
+// BIEN — organización por dominio (vertical slices)
+src/
+├── sales/
+│   ├── sales.controller.ts
+│   ├── sales.service.ts
+│   ├── sales.repository.ts
+│   └── schemas/
+├── users/
+│   ├── users.controller.ts
+│   ├── users.service.ts
+│   └── schemas/
+└── inventory/
+    ├── inventory.controller.ts
+    ├── inventory.service.ts
+    └── schemas/
+```
+
+Fíjate en el beneficio: todo lo que toca "sales" vive junto. Si el founder dice "tenemos que cambiar cómo funcionan las ventas", sabes exactamente dónde mirar.
+
+### Cómo está organizado Rush
+
+La estructura del monolito NestJS de Rush:
+
+```text
+src/
+├── sales/                   ← módulo de ventas
+│   ├── sales.module.ts
+│   ├── sales.controller.ts
+│   ├── use-cases/
+│   │   ├── create-sale.usecase.ts
+│   │   └── cancel-sale.usecase.ts
+│   ├── domain/
+│   │   └── sale.entity.ts
+│   └── schemas/
+├── onboarding/              ← módulo de onboarding
+│   ├── onboarding.module.ts
+│   └── ...
+├── health-score/            ← módulo de métricas
+│   ├── health-score.module.ts
+│   └── ...
+└── shared/                  ← código compartido entre módulos
+    ├── money/
+    ├── rls/
+    └── auth/
+```
+
+### Los límites entre módulos importan
+
+Un módulo no puede importar los internals de otro módulo. Solo puede comunicarse a través de la interfaz pública del módulo (lo que exporta el `*.module.ts`).
+
+```ts
+// MAL — acoplamiento entre módulos
+// en sales.service.ts
+import { HealthScoreRepository } from '../health-score/repositories/health-score.repository';
+
+// BIEN — comunicación por interfaz pública
+// en health-score.module.ts
+@Module({
+  exports: [HealthScoreService], // esto es la interfaz pública
+})
+export class HealthScoreModule {}
+
+// en sales.module.ts
+@Module({
+  imports: [HealthScoreModule],
+})
+export class SalesModule {}
+```
+
+En Rush usamos `eslint-plugin-boundaries` para que ESLint falle si un módulo importa algo que no está en la interfaz pública de otro módulo.
+
+### Qué va en `shared/`
+
+`shared/` no es un "misc" donde van las cosas que no sabes dónde poner. Solo va ahí:
+
+1. Código genuinamente compartido por 3+ módulos
+2. Primitivos de dominio (`Money`, `TenantContext`, `IdempotencyKey`)
+3. Utilidades técnicas cross-cutting (`rls`, `auth`, `logging`)
+
+Si solo dos módulos comparten algo, el código va en el módulo que "posee" el concepto y el otro lo usa a través de su interfaz.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="Refactorizar de organización técnica a vertical slices" estimatedMinutes={60}>
+
+### Setup
+
+```bash
+mkdir vertical-slices-lab && cd vertical-slices-lab
+pnpm init
+pnpm add -D typescript@6.0.3
+npx tsc --init --strict true --target ES2022 --module NodeNext --moduleResolution NodeNext
+```
+
+### Paso 1: Código mal organizado (punto de partida)
+
+```bash
+mkdir -p src/controllers src/services src/repositories
+```
+
+```ts
+// src/services/sales.service.ts
+export class SalesService {
+  createSale(businessId: string, amount: number) {
+    return { id: crypto.randomUUID(), businessId, amount };
+  }
+}
+
+// src/services/inventory.service.ts
+export class InventoryService {
+  checkStock(productId: string): number {
+    return 100; // placeholder
+  }
+}
+
+// src/controllers/sales.controller.ts
+import { SalesService } from '../services/sales.service.js';
+import { InventoryService } from '../services/inventory.service.js';
+
+export class SalesController {
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly inventoryService: InventoryService,
+  ) {}
+
+  createSale(businessId: string, productId: string, amount: number) {
+    const stock = this.inventoryService.checkStock(productId);
+    if (stock === 0) throw new Error('Out of stock');
+    return this.salesService.createSale(businessId, amount);
+  }
+}
+```
+
+### Paso 2: Refactorizar a vertical slices
+
+```bash
+mkdir -p src/sales src/inventory src/shared
+```
+
+```ts
+// src/sales/sales.service.ts
+export interface Sale {
+  id: string;
+  businessId: string;
+  amount: number;
+}
+
+export class SalesService {
+  createSale(businessId: string, amount: number): Sale {
+    return { id: crypto.randomUUID(), businessId, amount };
+  }
+}
+
+// src/sales/sales.controller.ts
+import { SalesService } from './sales.service.js';
+import { InventoryService } from '../inventory/inventory.service.js'; // interfaz pública OK
+
+export class SalesController {
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly inventoryService: InventoryService,
+  ) {}
+
+  createSale(businessId: string, productId: string, amount: number) {
+    const stock = this.inventoryService.checkStock(productId);
+    if (stock === 0) throw new Error('Out of stock');
+    return this.salesService.createSale(businessId, amount);
+  }
+}
+
+// src/inventory/inventory.service.ts
+export class InventoryService {
+  checkStock(productId: string): number {
+    return 100;
+  }
+}
+```
+
+### Paso 3: Ver la diferencia
+
+```bash
+# Antes
+find src/controllers src/services -name "*.ts" | sort
+
+# Después
+find src/sales src/inventory -name "*.ts" | sort
+```
+
+La segunda lista te dice de qué trata el negocio. La primera no.
+
+### Verificación final
+
+```bash
+npx tsc --noEmit
+```
+
+Sin errores. La estructura final debe mostrar los módulos de negocio claramente separados.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="Screaming Architecture">
+
+### Preguntas conceptuales
+
+1. Un nuevo dev abre el repo de Rush y ve las carpetas `sales/`, `onboarding/`, `health-score/`. ¿Qué ventaja concreta tiene eso sobre ver `controllers/`, `services/`, `repositories/`?
+2. ¿Qué criterio usas para decidir si algo va en `shared/` o en un módulo específico? Da un ejemplo de algo que SÍ iría en shared y algo que NO.
+3. ¿Por qué es un problema que `sales.service.ts` importe directamente un repositorio de otro módulo en vez de usar la interfaz pública del módulo?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Agrega un módulo `reports/` que necesita datos de `sales/` y de `inventory/`. Define claramente qué importa de cada módulo (solo la interfaz pública) y qué no debería importar (internals).
+- [ ] Test 2: Mueve una función utilitaria (ej: una función de format de moneda) desde `shared/` a solo uno de los módulos. ¿Qué tendrías que cambiar en el otro módulo que la usa?
+- [ ] Test 3: Crea un diagrama (puede ser de texto o mermaid) que muestre las dependencias entre `sales`, `inventory`, `reports` y `shared`. Verifica que no hay ciclos.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [SDD: cómo Rush decide antes de codear](../sdd-flujo/)

@@ -1,0 +1,202 @@
+---
+title: Claude Code y Engram como herramientas
+description: Claude Code en el terminal, Engram como memoria cross-session, SDD con Claude como executor.
+sidebar:
+  order: 10
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 2
+prerequisites: ["modulo-0/sdd-flujo"]
+learning_outcomes:
+  - Usar Claude Code como herramienta en el terminal sin perder el control del proceso
+  - Entender qué es Engram y cómo funciona como memoria cross-session
+  - Integrar Claude Code en el flujo SDD correctamente
+  - Identificar cuándo usar Claude y cuándo no usarlo
+last_updated: "2026-05-17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={2} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+La diferencia entre usar Claude como herramienta y usarlo como muleta es quién entiende el código al final. Si le pides a Claude que escriba código y lo copias sin leerlo, no aprendes nada y cualquier bug queda invisible para ti.
+
+El principio de Rush es: **el humano dirige, la IA ejecuta**. Tú defines qué construir y apruebas el resultado. Claude genera el código siguiendo tus instrucciones.
+
+### Claude Code — qué es y cómo encaja en el flujo
+
+Claude Code es la versión de Claude que corre directamente en tu terminal, con acceso al sistema de archivos del proyecto. En vez de copiar y pegar código entre una ventana del browser y el editor, Claude Code puede leer archivos, escribirlos, y ejecutar comandos.
+
+En Rush, Claude Code se usa principalmente como executor de fases SDD:
+
+```text
+Founder (tú) → define scope → aprueba spec → aprueba design
+Claude Code  → explora el repo → genera spec → genera design → ejecuta tasks → verifica
+```
+
+Fíjate que el founder aprueba en cada fase crítica. Claude no avanza si el humano no dice "continúa".
+
+### Qué le puedes pedir a Claude Code
+
+Cosas donde Claude Code agrega valor real:
+
+- Leer 10+ archivos del repo y resumir qué hacen (te ahorra tiempo de exploración)
+- Generar código repetitivo siguiendo un patrón que tú definiste
+- Ejecutar un spec SDD que tú aprobaste
+- Hacer refactors mecánicos (renombrar, reorganizar carpetas)
+- Escribir tests para código existente siguiendo un patrón
+
+Cosas donde Claude Code NO reemplaza tu criterio:
+
+- Decidir la arquitectura del sistema
+- Definir los criterios de aceptación del negocio
+- Aprobar código que toca lógica financiera
+- Elegir entre dos enfoques con tradeoffs no obvios
+
+### Engram — memoria que persiste entre sesiones
+
+Engram es el sistema de memoria persistente que usan los agentes Claude Code en Rush. El problema que resuelve es simple: Claude no recuerda las conversaciones anteriores. Si en una sesión tomaste una decisión de arquitectura, en la próxima sesión Claude empieza de cero.
+
+Engram guarda decisiones, bugs, convenciones y contexto del proyecto en una base de datos que persiste entre sesiones:
+
+```ts
+mem_save({
+  title: "Decisión: usar TIMESTAMPTZ en todos los timestamps",
+  type: "decision",
+  content: "Todos los campos de fecha/hora usan TIMESTAMPTZ..."
+})
+```
+
+La próxima sesión, el agente busca en Engram antes de preguntar:
+
+```text
+mem_search("timestamps postgres") → encuentra la decisión anterior
+```
+
+Eso evita que se repitan las mismas conversaciones en cada sesión.
+
+### Cuándo usar Claude Code en tu trabajo diario
+
+En Rush, como dev, usas Claude Code en dos contextos:
+
+1. **Para ejecutar fases SDD**: el orchestrator (Claude con todo el contexto del proyecto) lanza sub-agentes para fases específicas. Tú no configuras esto — es parte del flujo SDD.
+
+2. **Para tareas puntuales**: leer el repo, generar un test, hacer un refactor mecánico. Para esto, abres Claude Code en el terminal y le das contexto explícito de lo que necesitas.
+
+Regla práctica: si la tarea requiere entender el negocio o tomar decisiones de arquitectura, hazla tú. Si la tarea es mecánica y el resultado es verificable, delegala a Claude Code.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="Primera interacción con Claude Code" estimatedMinutes={60}>
+
+### Setup
+
+Si tienes Claude Code instalado:
+
+```bash
+# Instalar Claude Code si no lo tienes
+npm install -g @anthropic-ai/claude-code
+
+# Abrir Claude Code en el directorio del proyecto
+claude
+```
+
+Si no tienes acceso a Claude Code todavía, puedes hacer este lab con Claude.ai en el browser — el principio es el mismo.
+
+### Paso 1: Explorar el repo con Claude
+
+Abre Claude Code en el directorio `~/Dev/study-plan-tech` (el repo de este plan):
+
+```bash
+cd ~/Dev/study-plan-tech
+claude
+```
+
+Dentro de Claude Code, prueba estos prompts:
+
+```text
+Lee el archivo src/content.config.ts y explícame qué valida el schema.
+```
+
+Verifica que la explicación es correcta comparándola con lo que leíste en la unidad de Zod.
+
+```text
+Lista todos los componentes Astro en src/components/ y explica qué hace cada uno.
+```
+
+Verifica que las explicaciones son precisas.
+
+### Paso 2: Pedir generación de código controlada
+
+```text
+Genera un componente Astro llamado `UnitStatus.astro` con prop `status: 'pending' | 'in-progress' | 'done'`
+que muestre un chip de color (verde para done, amarillo para in-progress, gris para pending).
+Sigue el mismo patrón de scoped CSS que tiene `TrackBadge.astro`.
+```
+
+Cuando Claude genere el código, haz esto antes de aceptarlo:
+
+1. Lee el código y entiende qué hace cada línea
+2. Verifica que sigue el patrón de `TrackBadge.astro`
+3. Verifica que el TypeScript es correcto (sin `any`, tipos explícitos)
+
+Si algo no te convence, pide la corrección específica.
+
+### Paso 3: Pedir un refactor mecánico
+
+```text
+Todos los archivos .mdx en src/content/docs/modulo-0/ tienen un import de TrackBadge.
+Verifica que todos usan <TrackBadge track="modulo-0" /> con el prop correcto.
+```
+
+Fíjate cómo Claude lee múltiples archivos y reporta lo que encuentra. Eso es lo que hacen los sub-agentes SDD en la fase `explore`.
+
+### Verificación final
+
+Revisa que el componente `UnitStatus.astro` generado:
+
+1. No tiene errores de TypeScript (`pnpm check`)
+2. Sigue el patrón de scoped CSS del proyecto
+3. Lo entiendes completamente — si alguien te pregunta qué hace línea por línea, puedes explicarlo
+
+Si no puedes explicar el código que Claude generó, no está listo para merge.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="Claude Code y Engram como herramientas">
+
+### Preguntas conceptuales
+
+1. ¿Cuál es la diferencia entre usar Claude Code como herramienta y usarlo como muleta? ¿Qué criterio usas para saber cuál es cuál?
+2. ¿Por qué Engram guarda decisiones y convenciones en vez de dejar que el agente "recuerde" la conversación? ¿Qué problema resuelve eso?
+3. Si Claude Code genera código para una feature que toca lógica financiera, ¿qué harías antes de hacer commit? ¿Por qué?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Usando Claude Code (o Claude.ai), pide que lea el archivo `src/content.config.ts` y explique el schema. Verifica que la explicación es técnicamente correcta comparándola con lo que aprendiste en la unidad de Zod.
+- [ ] Test 2: Pide a Claude Code que genere un componente que sabes que debería seguir un patrón específico del proyecto. Verifica que el resultado sigue el patrón sin que hayas tenido que explicárselo línea por línea.
+- [ ] Test 3: Identifica una tarea de tu trabajo diario como dev que delegarías a Claude Code y una que NO delegarías. Escribe el criterio de decisión que usaste.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [Observabilidad: ver qué pasa en producción](../observabilidad-concepto/)

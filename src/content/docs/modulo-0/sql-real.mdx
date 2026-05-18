@@ -1,0 +1,258 @@
+---
+title: SQL de verdad
+description: JOINs, índices, EXPLAIN ANALYZE y timestamps — Postgres real, no el SQL que aprendiste en el curso.
+sidebar:
+  order: 2
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 3
+prerequisites: []
+learning_outcomes:
+  - Escribir JOINs que no matan el performance
+  - Crear índices correctamente y entender cuándo aplican
+  - Leer el output de EXPLAIN ANALYZE para detectar problemas
+  - Entender la diferencia crítica entre TIMESTAMPTZ y TIMESTAMP
+last_updated: "2026-05-17"
+stack_versions:
+  postgres: "17"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={3} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+La mayoría de los devs que saben SQL pueden hacer un SELECT básico. El problema aparece cuando tienes tablas con un millón de filas y una query que hace un full scan porque falta un índice, o cuando pierdes datos de timezone porque usaste `TIMESTAMP` sin la `TZ`.
+
+En Rush manejamos datos financieros venezolanos — timestamps con timezone, montos en dos monedas, historial append-only. El SQL tiene que ser correcto desde el principio.
+
+### JOINs — cómo funcionan realmente
+
+Fíjate que un JOIN es solo una forma de combinar filas de dos tablas según una condición. El tipo de JOIN determina qué pasa con las filas que no tienen match:
+
+```sql
+-- INNER JOIN — solo filas con match en ambas tablas
+SELECT b.name, u.email
+FROM businesses b
+INNER JOIN users u ON u.business_id = b.id;
+
+-- LEFT JOIN — todas las filas de la izquierda, con null si no hay match
+SELECT b.name, u.email
+FROM businesses b
+LEFT JOIN users u ON u.business_id = b.id;
+-- Devuelve negocios aunque no tengan usuarios
+```
+
+El error más común: usar `INNER JOIN` cuando en realidad necesitas `LEFT JOIN`. Si hay un negocio sin usuarios y usas INNER, desaparece del resultado — y es un bug silencioso.
+
+### Índices — cuándo Postgres los usa
+
+Un índice es una estructura de datos auxiliar que le permite a Postgres encontrar filas sin hacer un scan de toda la tabla. Pero no se usan automáticamente en todos los casos:
+
+```sql
+-- Índice en business_id — útil para queries que filtran por tenant
+CREATE INDEX idx_transactions_business_id ON transactions(business_id);
+
+-- Índice compuesto — útil cuando siempre filtras por ambas columnas
+CREATE INDEX idx_transactions_business_created ON transactions(business_id, created_at DESC);
+
+-- Índice único — además de velocidad, garantiza unicidad
+CREATE UNIQUE INDEX idx_idempotency_keys_tenant_key
+  ON idempotency_keys(business_id, idempotency_key);
+```
+
+Fíjate en el índice compuesto: el orden importa. Si tus queries siempre filtran por `business_id` y ordenan por `created_at`, ese índice compuesto es mucho más eficiente que dos índices separados.
+
+### EXPLAIN ANALYZE — leer lo que Postgres hace
+
+Antes de asumir que una query es lenta, mírala con `EXPLAIN ANALYZE`:
+
+```sql
+EXPLAIN ANALYZE
+SELECT t.id, t.amount, b.name
+FROM transactions t
+INNER JOIN businesses b ON b.id = t.business_id
+WHERE t.business_id = 'some-uuid'
+ORDER BY t.created_at DESC
+LIMIT 20;
+```
+
+Lo que buscas en el output:
+
+- `Seq Scan` = scan completo de la tabla = malo si la tabla es grande
+- `Index Scan` = usa un índice = bueno
+- `rows=` = cuántas filas estima Postgres = si está muy lejos del real, las estadísticas están desactualizadas
+- `actual time=` = tiempo real de ejecución de ese nodo
+
+```text
+Index Scan using idx_transactions_business_created on transactions
+  (cost=0.43..8.45 rows=20 width=36) (actual time=0.021..0.089 rows=20 loops=1)
+  Index Cond: (business_id = 'some-uuid')
+```
+
+Eso es lo que quieres ver: `Index Scan`, no `Seq Scan`.
+
+### TIMESTAMPTZ vs TIMESTAMP — la diferencia que sí importa
+
+`TIMESTAMP` guarda una fecha y hora sin información de timezone. `TIMESTAMPTZ` guarda la fecha y hora en UTC y convierte automáticamente al timezone de la sesión cuando la muestras.
+
+```sql
+-- MAL — pierde el timezone, causa bugs en Venezuela (UTC-4)
+created_at TIMESTAMP DEFAULT NOW()
+
+-- BIEN — guarda en UTC, muestra en el timezone correcto
+created_at TIMESTAMPTZ DEFAULT NOW()
+```
+
+En Rush TODOS los timestamps van con `TIMESTAMPTZ`. Si ves un `TIMESTAMP` sin `TZ` en el schema, es un bug.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="SQL con Postgres real" estimatedMinutes={90}>
+
+### Setup
+
+Para este lab necesitas Postgres corriendo. Si tienes Docker:
+
+```bash
+docker run --name rush-sql-lab \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=rush_lab \
+  -p 5432:5432 \
+  -d postgres:17
+```
+
+Conéctate con psql o cualquier cliente SQL (pgAdmin, DBeaver, TablePlus):
+
+```bash
+psql postgresql://postgres:password@localhost:5432/rush_lab
+```
+
+### Paso 1: Crear las tablas
+
+```sql
+-- Tabla de negocios
+CREATE TABLE businesses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Tabla de transacciones
+CREATE TABLE transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id),
+  amount NUMERIC(18, 2) NOT NULL,
+  currency TEXT NOT NULL CHECK (currency IN ('USD', 'VES')),
+  description TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Insertar datos de prueba
+INSERT INTO businesses (id, name) VALUES
+  ('a0000000-0000-0000-0000-000000000001', 'Panadería El Central'),
+  ('a0000000-0000-0000-0000-000000000002', 'Ferretería Bolívar');
+
+INSERT INTO transactions (business_id, amount, currency, description) VALUES
+  ('a0000000-0000-0000-0000-000000000001', 150.00, 'USD', 'Venta de pan'),
+  ('a0000000-0000-0000-0000-000000000001', 85.50, 'USD', 'Venta de torta'),
+  ('a0000000-0000-0000-0000-000000000002', 320.00, 'USD', 'Venta de materiales');
+```
+
+### Paso 2: Practicar JOINs
+
+```sql
+-- Todas las transacciones con el nombre del negocio
+SELECT b.name, t.amount, t.currency, t.description, t.created_at
+FROM transactions t
+INNER JOIN businesses b ON b.id = t.business_id
+ORDER BY t.created_at DESC;
+
+-- Negocios sin transacciones (LEFT JOIN)
+SELECT b.name, COUNT(t.id) AS transaction_count
+FROM businesses b
+LEFT JOIN transactions t ON t.business_id = b.id
+GROUP BY b.id, b.name
+ORDER BY transaction_count DESC;
+```
+
+### Paso 3: Crear índices y ver el efecto
+
+```sql
+-- Insertar muchas filas para que los índices tengan sentido
+INSERT INTO transactions (business_id, amount, currency, description)
+SELECT
+  'a0000000-0000-0000-0000-000000000001',
+  (random() * 500)::numeric(18,2),
+  'USD',
+  'Transacción de prueba ' || generate_series
+FROM generate_series(1, 10000);
+
+-- Sin índice — analizar
+EXPLAIN ANALYZE
+SELECT * FROM transactions
+WHERE business_id = 'a0000000-0000-0000-0000-000000000001'
+ORDER BY created_at DESC
+LIMIT 20;
+-- Fíjate en Seq Scan
+
+-- Crear índice
+CREATE INDEX idx_transactions_biz_created ON transactions(business_id, created_at DESC);
+
+-- Con índice — analizar de nuevo
+EXPLAIN ANALYZE
+SELECT * FROM transactions
+WHERE business_id = 'a0000000-0000-0000-0000-000000000001'
+ORDER BY created_at DESC
+LIMIT 20;
+-- Ahora deberías ver Index Scan
+```
+
+### Verificación final
+
+```sql
+-- Verifica que el plan usa el índice
+EXPLAIN ANALYZE
+SELECT COUNT(*) FROM transactions WHERE business_id = 'a0000000-0000-0000-0000-000000000001';
+```
+
+Confirma que el output dice `Index Only Scan` o `Index Scan`, no `Seq Scan`.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="SQL de verdad">
+
+### Preguntas conceptuales
+
+1. ¿Cuál es la diferencia entre `INNER JOIN` y `LEFT JOIN`? Da un ejemplo donde usar el incorrecto causaría un bug silencioso.
+2. ¿Por qué es importante el orden de las columnas en un índice compuesto? ¿Cuándo el índice `(business_id, created_at)` ayuda y cuándo no ayuda?
+3. ¿Por qué Rush usa `TIMESTAMPTZ` en vez de `TIMESTAMP`? ¿Qué bug concreto puede causar usar `TIMESTAMP` en una aplicación venezolana?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Agrega un negocio sin transacciones y verifica que aparece en el `LEFT JOIN` con `COUNT = 0` y NO aparece en el `INNER JOIN`.
+- [ ] Test 2: Corre `EXPLAIN ANALYZE` en la query del Paso 3 antes y después de crear el índice. Documenta la diferencia en `actual time`.
+- [ ] Test 3: Inserta un timestamp sin `TZ` y uno con `TZ`, luego cambia el `timezone` de la sesión con `SET timezone = 'America/Caracas'` y verifica qué pasa con cada uno.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [Git como herramienta de equipo](../git-workflow/)

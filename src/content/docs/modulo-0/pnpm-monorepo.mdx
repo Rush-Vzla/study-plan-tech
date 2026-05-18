@@ -1,0 +1,260 @@
+---
+title: pnpm y el workspace de Rush
+description: Workspaces, lockfile estricto y publicar paquetes — cómo está organizado el repo de Rush.
+sidebar:
+  order: 5
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 2
+prerequisites: []
+learning_outcomes:
+  - Entender por qué Rush usa pnpm en vez de npm o yarn
+  - Trabajar con pnpm workspaces para monorepos
+  - Entender qué es un lockfile y por qué no se toca manualmente
+  - Publicar un paquete interno a GitHub Packages
+last_updated: "2026-05-17"
+stack_versions:
+  pnpm: "11.1.2"
+  node: "20.18.0"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={2} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+Rush usa pnpm por tres razones concretas: es más rápido que npm y yarn, tiene un sistema de workspaces maduro para monorepos, y su lockfile es más estricto (no permite dependencias fantasma).
+
+### pnpm vs npm — la diferencia que importa
+
+npm y yarn copian los paquetes en el `node_modules` de cada proyecto. pnpm usa un almacén global de paquetes y crea links simbólicos. Resultado: ocupa mucho menos espacio en disco y el install es más rápido porque los paquetes ya descargados no se vuelven a descargar.
+
+Pero la diferencia más importante para Rush es que pnpm prohíbe las "dependencias fantasma":
+
+```text
+Con npm: si paquete A depende de lodash, tu código puede importar lodash
+directamente aunque no esté en tu package.json — npm lo pone en node_modules
+y TypeScript lo encuentra.
+
+Con pnpm: NO. Si lodash no está en tu package.json, no puedes importarlo,
+aunque A lo use. Eso evita bugs de versiones implícitas.
+```
+
+### Workspaces — varios packages en un repo
+
+Un workspace de pnpm te permite tener múltiples packages en el mismo repo, cada uno con su propio `package.json`, pero con dependencias compartidas y comandos unificados.
+
+La estructura de Rush:
+
+```text
+rush-api/                    ← repo principal del backend
+├── package.json             ← workspace root
+├── pnpm-workspace.yaml      ← define los packages
+├── packages/
+│   └── shared-schemas/      ← package @rush/shared-schemas
+│       ├── package.json
+│       └── src/
+├── apps/
+│   └── api/                 ← NestJS app
+│       ├── package.json
+│       └── src/
+```
+
+```yaml
+# pnpm-workspace.yaml
+packages:
+  - "packages/*"
+  - "apps/*"
+```
+
+Con eso, `pnpm install` desde el root instala todas las dependencias de todos los packages.
+
+### Lockfile — por qué no se modifica a mano
+
+El `pnpm-lock.yaml` es generado automáticamente por pnpm y registra las versiones exactas de cada dependencia. Nunca se edita manualmente.
+
+En CI, siempre se usa `--frozen-lockfile`:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+Si el lockfile no coincide con el `package.json`, el install falla. Eso garantiza que en CI se instalan exactamente las mismas versiones que en desarrollo.
+
+### GitHub Packages — publicar paquetes internos
+
+`@rush/shared-schemas` es el paquete que comparte los schemas Zod entre el backend (NestJS) y el frontend (React). Se publica a GitHub Packages para que ambos repos puedan consumirlo.
+
+Para consumir un paquete de GitHub Packages en tu proyecto:
+
+```bash
+# .npmrc en el root del repo consumidor
+@rush:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+```json
+// package.json
+{
+  "dependencies": {
+    "@rush/shared-schemas": "1.0.0"
+  }
+}
+```
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="pnpm workspace básico" estimatedMinutes={60}>
+
+### Setup
+
+Verifica que tienes pnpm instalado:
+
+```bash
+pnpm --version
+# Debe ser >= 11.0.0
+```
+
+Si no lo tienes:
+
+```bash
+npm install -g pnpm@11.1.2
+```
+
+### Paso 1: Crear un workspace básico
+
+```bash
+mkdir pnpm-lab && cd pnpm-lab
+pnpm init
+```
+
+Crea `pnpm-workspace.yaml`:
+
+```yaml
+packages:
+  - "packages/*"
+```
+
+Crea la estructura de packages:
+
+```bash
+mkdir -p packages/shared-utils packages/app
+```
+
+### Paso 2: Configurar los packages
+
+```bash
+# Package shared-utils
+cat > packages/shared-utils/package.json << 'EOF'
+{
+  "name": "@lab/shared-utils",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}
+EOF
+
+mkdir -p packages/shared-utils/src
+cat > packages/shared-utils/src/index.ts << 'EOF'
+export function formatCurrency(amount: number, currency: 'USD' | 'VES'): string {
+  return `${currency} ${amount.toFixed(2)}`;
+}
+
+export type Currency = 'USD' | 'VES';
+EOF
+```
+
+```bash
+# Package app que depende de shared-utils
+cat > packages/app/package.json << 'EOF'
+{
+  "name": "@lab/app",
+  "version": "1.0.0",
+  "dependencies": {
+    "@lab/shared-utils": "workspace:*"
+  }
+}
+EOF
+
+mkdir -p packages/app/src
+cat > packages/app/src/index.ts << 'EOF'
+import { formatCurrency } from '@lab/shared-utils';
+
+const result = formatCurrency(150.50, 'USD');
+console.log(result); // USD 150.50
+EOF
+```
+
+### Paso 3: Instalar y verificar el workspace
+
+```bash
+# Desde el root del workspace
+pnpm install
+
+# Verificar que el link se creó correctamente
+ls packages/app/node_modules/@lab/
+# Debe mostrar shared-utils como symlink
+
+# Correr un comando en un package específico
+pnpm --filter @lab/app exec node -e "require('./src/index.ts')"
+```
+
+### Paso 4: Comandos útiles de workspace
+
+```bash
+# Instalar una dep en un package específico
+pnpm add -D typescript --filter @lab/shared-utils
+
+# Correr scripts en todos los packages
+pnpm -r run build
+
+# Ver el árbol de dependencias
+pnpm list --depth=2
+```
+
+### Verificación final
+
+```bash
+pnpm list --recursive --depth=0
+```
+
+Debe mostrar los dos packages con sus dependencias correctamente resueltas.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="pnpm y el workspace de Rush">
+
+### Preguntas conceptuales
+
+1. ¿Qué es una "dependencia fantasma" y cómo pnpm la previene? ¿Por qué es un problema real en proyectos grandes?
+2. ¿Por qué el CI usa `pnpm install --frozen-lockfile` en vez de `pnpm install`? ¿Qué pasa si no usas `--frozen-lockfile` en CI?
+3. ¿Qué significa `"@lab/shared-utils": "workspace:*"` en el `package.json` de app? ¿Por qué es mejor que usar una versión fija?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Agrega una dependencia a `@lab/shared-utils` sin pasar por el root (`cd packages/shared-utils && pnpm add lodash`). Observa qué pasa con el lockfile y el workspace. ¿Es lo mismo que agregar desde el root con `--filter`?
+- [ ] Test 2: Modifica una función en `shared-utils`, luego importa la función modificada desde `app` sin hacer nada más. ¿Los cambios se reflejan inmediatamente? ¿Por qué?
+- [ ] Test 3: Corre `pnpm install --frozen-lockfile` después de agregar una nueva dependencia al `package.json` (sin correr `pnpm install` antes). Verifica que falla con el error esperado.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [Zod: validación que no miente](../zod-schemas/)

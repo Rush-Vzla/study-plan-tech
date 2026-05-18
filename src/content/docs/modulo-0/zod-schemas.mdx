@@ -1,0 +1,278 @@
+---
+title: "Zod: validación que no miente"
+description: Schemas, parse vs safeParse, composición e inferencia de tipos — una sola fuente de verdad.
+sidebar:
+  order: 6
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 2
+prerequisites: ["modulo-0/ts-estricto"]
+learning_outcomes:
+  - Definir schemas Zod para validar datos en runtime
+  - Entender la diferencia entre parse y safeParse y cuándo usar cada uno
+  - Componer schemas para reutilizar validaciones
+  - Inferir tipos TypeScript desde schemas sin duplicar definiciones
+last_updated: "2026-05-17"
+stack_versions:
+  typescript: "6.0.3"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={2} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+TypeScript te da seguridad de tipos en tiempo de compilación. Zod te da validación en tiempo de ejecución. Son complementarios, no alternativos.
+
+Fíjate en el problema: cuando llega un request HTTP a tu API, el payload es `unknown` — TypeScript no puede saber qué viene. Zod valida que la forma del dato es la esperada, y si pasa la validación, el dato queda tipado correctamente.
+
+En Rush, Zod es la herramienta de validación en dos capas: en el borde HTTP (pipes de NestJS) y dentro de cada use case. Pero eso lo verás en el Track Backend. Acá aprendes la herramienta base.
+
+### parse vs safeParse
+
+La diferencia es cómo manejan los errores:
+
+```ts
+import { z } from 'zod';
+
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  age: z.number().int().min(18),
+});
+
+// parse — lanza ZodError si falla
+const user = UserSchema.parse({ id: 'not-a-uuid', email: 'bad' });
+// Lanza: ZodError [{ path: ['id'], message: 'Invalid uuid' }, ...]
+
+// safeParse — retorna un objeto con success/error
+const result = UserSchema.safeParse({ id: 'not-a-uuid', email: 'bad' });
+if (!result.success) {
+  console.error(result.error.issues);
+  // [{ path: ['id'], message: 'Invalid uuid' }, ...]
+} else {
+  console.log(result.data); // tipado como User
+}
+```
+
+Regla en Rush:
+
+- `parse` en lugares donde un error de validación es siempre un bug del dev (test setup, seeds, config interna)
+- `safeParse` en boundaries de entrada (HTTP request, mensajes de queue) donde el dato puede ser inválido legítimamente
+
+### Tipos de validaciones más usados
+
+```ts
+// Strings
+z.string()                    // cualquier string
+z.string().min(1)             // no vacío
+z.string().max(255)           // máximo 255 chars
+z.string().email()            // email válido
+z.string().uuid()             // UUID válido
+z.string().url()              // URL válida
+z.string().regex(/^\d{7,8}$/) // RIF venezolano (solo el número)
+
+// Números
+z.number()                    // cualquier número
+z.number().int()              // entero
+z.number().positive()         // > 0
+z.number().min(0).max(100)    // rango
+
+// Enums y literales
+z.enum(['USD', 'VES'])
+z.literal('active')
+
+// Arrays y objetos
+z.array(z.string())
+z.object({ name: z.string() })
+
+// Opcionales y defaults
+z.string().optional()         // string | undefined
+z.string().nullable()         // string | null
+z.string().default('pending') // valor por defecto
+```
+
+### Composición — reutilizar schemas
+
+En vez de copiar validaciones, los schemas se pueden componer:
+
+```ts
+const AddressSchema = z.object({
+  street: z.string().min(1),
+  city: z.string().min(1),
+  country: z.string().length(2), // ISO 3166-1 alpha-2
+});
+
+const BusinessSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(100),
+  address: AddressSchema, // reutilizar
+  currency: z.enum(['USD', 'VES']),
+});
+
+// Extend — agregar campos a un schema existente
+const BusinessWithTimestamps = BusinessSchema.extend({
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+// Pick — solo algunos campos
+const BusinessSummary = BusinessSchema.pick({ id: true, name: true });
+```
+
+### Inferencia de tipos
+
+Como viste en la unidad de TypeScript, inferís el tipo desde el schema:
+
+```ts
+type Business = z.infer<typeof BusinessSchema>;
+type BusinessSummary = z.infer<typeof BusinessSummary>;
+```
+
+Una sola fuente de verdad. Si agregas un campo al schema, el tipo se actualiza automáticamente.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="Schemas Zod para Rush" estimatedMinutes={60}>
+
+### Setup
+
+```bash
+mkdir zod-lab && cd zod-lab
+pnpm init
+pnpm add zod@4.4.3
+pnpm add -D typescript@6.0.3
+npx tsc --init --strict true --target ES2022 --module NodeNext --moduleResolution NodeNext
+```
+
+### Paso 1: Definir los schemas de transacciones de Rush
+
+```ts
+// src/schemas.ts
+import { z } from 'zod';
+
+export const CurrencySchema = z.enum(['USD', 'VES']);
+export type Currency = z.infer<typeof CurrencySchema>;
+
+export const MoneySchema = z.object({
+  amount: z.number().positive(),
+  currency: CurrencySchema,
+  usdEquivalent: z.number().positive(),
+  referenceRate: z.number().positive(),
+});
+export type Money = z.infer<typeof MoneySchema>;
+
+export const CreateTransactionSchema = z.object({
+  businessId: z.string().uuid(),
+  money: MoneySchema,
+  description: z.string().min(1).max(255),
+  idempotencyKey: z.string().uuid(),
+});
+export type CreateTransaction = z.infer<typeof CreateTransactionSchema>;
+```
+
+### Paso 2: Usar parse y safeParse
+
+```ts
+// src/validate.ts
+import { CreateTransactionSchema } from './schemas.js';
+
+// Caso válido
+const validInput = {
+  businessId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  money: {
+    amount: 150.00,
+    currency: 'USD',
+    usdEquivalent: 150.00,
+    referenceRate: 1.0,
+  },
+  description: 'Venta de inventario',
+  idempotencyKey: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+};
+
+const result = CreateTransactionSchema.safeParse(validInput);
+if (result.success) {
+  console.log('Válido:', result.data.description);
+}
+
+// Caso inválido
+const invalidInput = {
+  businessId: 'not-a-uuid',
+  money: { amount: -50, currency: 'EUR' }, // moneda inválida + monto negativo
+  description: '',
+  idempotencyKey: 'also-not-a-uuid',
+};
+
+const errorResult = CreateTransactionSchema.safeParse(invalidInput);
+if (!errorResult.success) {
+  errorResult.error.issues.forEach((issue) => {
+    console.log(`${issue.path.join('.')}: ${issue.message}`);
+  });
+}
+```
+
+### Paso 3: Schema para HTTP request (con transformaciones)
+
+```ts
+// src/http-schemas.ts
+import { z } from 'zod';
+import { MoneySchema } from './schemas.js';
+
+// Schema para lo que llega del cliente (strings de fecha, etc.)
+export const CreateTransactionRequestSchema = z.object({
+  businessId: z.string().uuid(),
+  money: MoneySchema,
+  description: z.string().min(1).max(255).trim(), // trim() limpia espacios
+  idempotencyKey: z.string().uuid(),
+  scheduledAt: z.coerce.date().optional(), // transforma string ISO a Date
+});
+
+export type CreateTransactionRequest = z.infer<typeof CreateTransactionRequestSchema>;
+```
+
+### Verificación final
+
+```bash
+npx tsc --noEmit
+```
+
+Sin errores de TypeScript. Los tipos inferidos son correctos — verifica con el autocompletado de tu editor que TypeScript sabe exactamente la forma de cada tipo.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="Zod: validación que no miente">
+
+### Preguntas conceptuales
+
+1. ¿Por qué usas `safeParse` en el borde de entrada de una API y `parse` en la configuración interna? ¿Qué implicación tiene cada uno para el manejo de errores?
+2. ¿Cuál es la ventaja de `z.coerce.date()` sobre `z.date()`? ¿Qué caso resuelve con datos que vienen de una request HTTP?
+3. Explica cómo `MoneySchema` puede ser reutilizado dentro de `CreateTransactionSchema`. ¿Qué pasa con el tipo TypeScript resultante?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Pasa un payload con un campo extra no definido en el schema (ej: `{ ...validInput, extraField: 'malicioso' }`). ¿Qué hace Zod con ese campo por defecto? ¿Cómo lo configurarías para que lo rechace?
+- [ ] Test 2: Usa `CreateTransactionSchema.partial()` para crear un tipo de update parcial. Verifica que TypeScript infiere todos los campos como opcionales.
+- [ ] Test 3: Crea un schema que tenga una refine custom: el `usdEquivalent` debe ser igual a `amount * referenceRate` con una tolerancia de ±0.01. Usa `z.refine()`.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [Clean Architecture sin ceremonias](../clean-arch-pragmatica/)

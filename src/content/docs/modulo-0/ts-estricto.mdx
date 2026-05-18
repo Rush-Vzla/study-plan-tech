@@ -1,0 +1,282 @@
+---
+title: TypeScript sin trampa
+description: strict mode, genéricos, utilidades de tipos y Zod inference — sin any, sin casteos.
+sidebar:
+  order: 1
+  badge:
+    text: obligatorio
+    variant: note
+tags: [obligatorio, m0]
+track: modulo-0
+unit_type: lectura-lab-checkpoint
+estimated_hours: 3
+prerequisites: []
+learning_outcomes:
+  - Configurar TypeScript en strict mode y entender por qué cada opción importa
+  - Usar genéricos para escribir código reutilizable sin perder tipos
+  - Inferir tipos desde schemas Zod en vez de duplicar definiciones
+  - Eliminar any y as de tu código de forma permanente
+last_updated: "2026-05-17"
+stack_versions:
+  typescript: "6.0.3"
+lab_runnable: false
+extra: false
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+import TimeEstimate from '../../../components/TimeEstimate.astro';
+import TrackBadge from '../../../components/TrackBadge.astro';
+
+<TimeEstimate hours={3} />
+<TrackBadge track="modulo-0" />
+
+## 1. Conceptos
+
+TypeScript sin `strict: true` no es TypeScript — es JavaScript con autocompletado. El modo estricto activa las verificaciones que realmente te protegen de los errores más comunes.
+
+Fíjate que en Rush, el `tsconfig.json` tiene `"strict": true` y no hay excepciones. Si agregas código con `any` o `as`, el PR no pasa.
+
+### ¿Qué activa strict mode?
+
+`strict: true` es un shorthand para estas opciones:
+
+```json
+{
+  "strictNullChecks": true,
+  "strictFunctionTypes": true,
+  "strictPropertyInitialization": true,
+  "noImplicitAny": true,
+  "noImplicitThis": true,
+  "alwaysStrict": true
+}
+```
+
+La más importante para tu día a día es `strictNullChecks`. Sin ella, `null` y `undefined` pueden aparecer en cualquier lugar sin que TypeScript se queje. Con ella, tienes que manejar esos casos explícitamente.
+
+### Genéricos — código que escala sin perder tipos
+
+Un genérico es una variable de tipo. Te permite escribir funciones que funcionan con distintos tipos sin perder la información de cuál es el tipo real.
+
+```ts
+// Sin genérico — pierde el tipo, retorna any
+function first(arr: any[]): any {
+  return arr[0];
+}
+
+// Con genérico — retorna el mismo tipo que el array de entrada
+function first<T>(arr: T[]): T | undefined {
+  return arr[0];
+}
+
+const result = first([1, 2, 3]); // TypeScript sabe que result es number | undefined
+```
+
+Fíjate que con el genérico, TypeScript sabe exactamente qué tipo retorna la función. Eso significa que si después usas `result.toFixed(2)`, el autocompletado funciona y el compilador valida.
+
+### Tipos de utilidad que usamos en Rush
+
+TypeScript trae algunos tipos predefinidos que son muy útiles:
+
+```ts
+interface User {
+  id: string;
+  email: string;
+  role: 'admin' | 'member';
+  createdAt: Date;
+}
+
+// Partial — todos los campos opcionales (útil para updates)
+type UserUpdate = Partial<User>;
+
+// Required — todos los campos obligatorios
+type UserRequired = Required<User>;
+
+// Pick — solo algunos campos
+type UserSummary = Pick<User, 'id' | 'email'>;
+
+// Omit — todos excepto algunos
+type UserWithoutDates = Omit<User, 'createdAt'>;
+
+// Record — un objeto con claves de un tipo y valores de otro
+type RolePermissions = Record<User['role'], string[]>;
+```
+
+### Zod inference — un solo lugar para el tipo
+
+El error más común que ves en proyectos TypeScript es esto: tienes una interfaz TypeScript Y un schema de validación que hacen lo mismo, y después no están sincronizados.
+
+La solución es inferir el tipo desde el schema:
+
+```ts
+import { z } from 'zod';
+
+const BusinessSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  currency: z.enum(['USD', 'VES']),
+  createdAt: z.coerce.date(),
+});
+
+// Infieres el tipo del schema — una sola fuente de verdad
+type Business = z.infer<typeof BusinessSchema>;
+
+// Ahora Business es equivalente a:
+// {
+//   id: string;
+//   name: string;
+//   currency: "USD" | "VES";
+//   createdAt: Date;
+// }
+```
+
+Si cambias el schema, el tipo cambia automáticamente. Si el tipo y la validación están separados, inevitablemente se van a desincronizar.
+
+---
+
+## 2. Lab guiado
+
+<LabSpec title="TypeScript strict en práctica" estimatedMinutes={90}>
+
+### Setup
+
+```bash
+mkdir ts-strict-lab && cd ts-strict-lab
+pnpm init
+pnpm add -D typescript@6.0.3
+npx tsc --init --strict true --target ES2022 --module NodeNext --moduleResolution NodeNext
+```
+
+### Paso 1: Activar strict mode y ver los errores
+
+Crea el archivo `src/users.ts`:
+
+```ts
+// src/users.ts
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+function getUserEmail(user: User | null): string {
+  return user.email; // Error: Object is possibly 'null'
+}
+```
+
+Corre `npx tsc --noEmit` y fíjate en el error. TypeScript te está diciendo que `user` puede ser `null`, y si lo accedes sin verificar, es un bug en runtime.
+
+Ahora arréglalo:
+
+```ts
+// src/users.ts
+function getUserEmail(user: User | null): string {
+  if (!user) return '';
+  return user.email; // Ahora TypeScript sabe que user no es null
+}
+```
+
+Corre `npx tsc --noEmit` de nuevo — sin errores.
+
+### Paso 2: Escribe una función genérica útil
+
+```ts
+// src/utils.ts
+export function findById<T extends { id: string }>(
+  items: T[],
+  id: string
+): T | undefined {
+  return items.find((item) => item.id === id);
+}
+
+// Úsala con distintos tipos
+const users: User[] = [
+  { id: '1', name: 'Ana', email: 'ana@rush.com' },
+  { id: '2', name: 'Luis', email: 'luis@rush.com' },
+];
+
+const found = findById(users, '1');
+// found es User | undefined — TypeScript lo sabe
+```
+
+### Paso 3: Inferir tipos desde un schema Zod
+
+```bash
+pnpm add zod@4.4.3
+```
+
+```ts
+// src/schemas.ts
+import { z } from 'zod';
+
+export const TransactionSchema = z.object({
+  id: z.string().uuid(),
+  businessId: z.string().uuid(),
+  amount: z.number().positive(),
+  currency: z.enum(['USD', 'VES']),
+  description: z.string().min(1).max(255),
+  createdAt: z.coerce.date(),
+});
+
+export type Transaction = z.infer<typeof TransactionSchema>;
+
+// Función de validación
+export function parseTransaction(raw: unknown): Transaction {
+  return TransactionSchema.parse(raw);
+}
+```
+
+```ts
+// src/main.ts
+import { parseTransaction } from './schemas.js';
+
+const raw = {
+  id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  businessId: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  amount: 150.0,
+  currency: 'USD',
+  description: 'Venta de inventario',
+  createdAt: '2026-05-17T10:00:00Z',
+};
+
+try {
+  const transaction = parseTransaction(raw);
+  console.log(transaction.amount); // TypeScript sabe que es number
+} catch (err) {
+  console.error('Datos inválidos', err);
+}
+```
+
+### Verificación final
+
+```bash
+npx tsc --noEmit
+```
+
+Tiene que terminar sin errores. Si hay errores de tipo, arrégllos antes de avanzar. Cada error de TypeScript en tiempo de compilación es un bug que no llegará a producción.
+
+</LabSpec>
+
+---
+
+## 3. Checkpoint
+
+<Checkpoint unit="TypeScript sin trampa">
+
+### Preguntas conceptuales
+
+1. ¿Por qué `strictNullChecks` es la opción más importante de strict mode? Da un ejemplo de un bug que previene.
+2. ¿Cuál es la diferencia entre usar `Partial<User>` y definir todos los campos de `User` como opcionales manualmente? ¿Cuándo usarías cada uno?
+3. ¿Por qué inferir el tipo desde el schema Zod (`z.infer<typeof Schema>`) es mejor que mantener una interfaz TypeScript separada?
+
+### Tests que tienes que hacer pasar/fallar
+
+- [ ] Test 1: Crea una función que acepte `string | null` y que TypeScript te fuerce a manejar el caso `null` antes de usar el valor.
+- [ ] Test 2: Escribe una función genérica `mapById<T extends { id: string }>(items: T[]): Record<string, T>` y verifica que TypeScript infiere el tipo correcto del resultado.
+- [ ] Test 3: Intenta usar `any` en algún lugar del lab y confirma que `npx tsc --noEmit` falla con `noImplicitAny`.
+
+</Checkpoint>
+
+## Próxima unidad
+
+→ [SQL de verdad](../sql-real/)
