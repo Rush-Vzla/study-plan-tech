@@ -39,7 +39,7 @@ export const collections = {
         // Pedagogia
         unit_type: unitTypeEnum.default('lectura-lab-checkpoint'),
         track: trackEnum.optional(),
-        estimated_hours: z.number().min(0).max(40).optional(),
+        estimated_hours: z.number().min(0).max(200).optional(),
         prerequisites: z.array(z.string()).default([]),
         learning_outcomes: z.array(z.string()).default([]),
 
