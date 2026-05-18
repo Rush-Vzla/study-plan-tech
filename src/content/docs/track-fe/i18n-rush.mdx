@@ -1,0 +1,241 @@
+---
+title: 'Internacionalización es-VE/es-AR/en/pt-BR'
+description: 'react-i18next, namespaces por feature y cambio de idioma en runtime. Cómo Rush soporta cuatro locales sin duplicar lógica.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/feature-first']
+learning_outcomes:
+  - 'Configurar react-i18next con namespaces por feature'
+  - 'Usar el hook useTranslation en componentes'
+  - 'Cambiar el idioma en runtime sin recargar la página'
+  - 'Formatear fechas y números según el locale activo'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 12
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### Los cuatro locales de Rush
+
+Rush soporta cuatro locales:
+
+- `es-VE` — Español Venezuela (default)
+- `es-AR` — Español Argentina
+- `en` — English
+- `pt-BR` — Português Brasil
+
+Fíjate que `es-VE` y `es-AR` son el mismo idioma pero con diferencias de vocabulario y formato de moneda. Rush mantiene archivos separados para no mezclar "Bs." con "$" o "ARS".
+
+### Namespaces por feature
+
+i18next usa namespaces para organizar las traducciones. Rush usa un namespace por feature:
+
+```text
+public/locales/
+├── es-VE/
+│   ├── common.json       <- textos compartidos (botones, errores genéricos)
+│   ├── sales.json        <- textos del feature sales
+│   └── auth.json         <- textos del feature auth
+├── es-AR/
+│   └── ... (misma estructura)
+├── en/
+│   └── ...
+└── pt-BR/
+    └── ...
+```
+
+Cargar namespaces por feature en vez de uno solo global reduce el tiempo de carga inicial — el feature de ventas solo carga `sales.json` cuando se necesita.
+
+### Formateo de fechas y números
+
+Los números y fechas se formatean con la API nativa de JavaScript (`Intl`), no con textos hardcodeados:
+
+```ts
+const amount = 1500.5;
+const formatted = new Intl.NumberFormat('es-VE', {
+  style: 'currency',
+  currency: 'VES',
+}).format(amount);
+// → "Bs. 1.500,50"
+
+// Con locale 'en':
+// → "VES 1,500.50"
+```
+
+La i18n no es solo traducir texto — es formatear según las convenciones del locale.
+
+## 2. Lab guiado
+
+<LabSpec title="Configurar react-i18next con cambio de locale en runtime" estimatedMinutes={40} runnable={false}>
+
+Vas a configurar i18next y crear un selector de idioma funcional.
+
+### Setup
+
+```bash
+pnpm add react-i18next i18next i18next-http-backend
+```
+
+### Paso 1: archivos de traducción
+
+```json
+// public/locales/es-VE/common.json
+{
+  "buttons": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "loading": "Procesando..."
+  },
+  "errors": {
+    "generic": "Ocurrió un error. Intenta de nuevo."
+  }
+}
+```
+
+```json
+// public/locales/es-VE/sales.json
+{
+  "title": "Ventas",
+  "form": {
+    "amount": "Monto",
+    "currency": "Moneda",
+    "submit": "Registrar venta"
+  },
+  "table": {
+    "date": "Fecha",
+    "amount": "Monto",
+    "usd": "Equivalente USD"
+  }
+}
+```
+
+```json
+// public/locales/en/sales.json
+{
+  "title": "Sales",
+  "form": {
+    "amount": "Amount",
+    "currency": "Currency",
+    "submit": "Record sale"
+  },
+  "table": {
+    "date": "Date",
+    "amount": "Amount",
+    "usd": "USD Equivalent"
+  }
+}
+```
+
+### Paso 2: configurar i18next
+
+```ts
+// src/lib/i18n.ts
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import HttpBackend from 'i18next-http-backend';
+
+i18n
+  .use(HttpBackend)
+  .use(initReactI18next)
+  .init({
+    lng: 'es-VE',
+    fallbackLng: 'en',
+    ns: ['common', 'sales', 'auth'],
+    defaultNS: 'common',
+    backend: {
+      loadPath: '/locales/{{lng}}/{{ns}}.json',
+    },
+    interpolation: {
+      escapeValue: false,
+    },
+  });
+
+export default i18n;
+```
+
+```tsx
+// src/main.tsx — importar antes del árbol de React
+import '@/lib/i18n';
+```
+
+### Paso 3: usar en componentes
+
+```tsx
+// src/features/sales/components/SalesPage.tsx
+import { useTranslation } from 'react-i18next';
+
+export function SalesPage() {
+  const { t } = useTranslation('sales');
+
+  return (
+    <div>
+      <h1>{t('title')}</h1>
+    </div>
+  );
+}
+```
+
+### Paso 4: selector de idioma
+
+```tsx
+// src/components/LanguageSelector.tsx
+import { useTranslation } from 'react-i18next';
+
+const LOCALES = [
+  { code: 'es-VE', label: 'Español (Venezuela)' },
+  { code: 'es-AR', label: 'Español (Argentina)' },
+  { code: 'en', label: 'English' },
+  { code: 'pt-BR', label: 'Português (Brasil)' },
+];
+
+export function LanguageSelector() {
+  const { i18n } = useTranslation();
+
+  return (
+    <select
+      value={i18n.language}
+      onChange={(e) => i18n.changeLanguage(e.target.value)}
+    >
+      {LOCALES.map((locale) => (
+        <option key={locale.code} value={locale.code}>
+          {locale.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
+### Verificación final
+
+Cambia el idioma en el selector y verifica que:
+
+1. El texto del componente de ventas cambia sin recargar la página
+2. No hay flasheo de texto vacío (si hay, el backend de i18next no cargó el namespace a tiempo — usa `Suspense` o precarga el namespace)
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="i18n-rush">
+
+1. ¿Por qué Rush tiene `es-VE` y `es-AR` como locales separados si son el mismo idioma?
+2. ¿Qué hace `fallbackLng: 'en'` cuando un texto no tiene traducción en `es-VE`?
+3. ¿Cómo formateas un número como moneda usando el locale activo de i18next sin hardcodear el locale?
+
+- [ ] El selector de idioma cambia el texto de la interfaz en runtime sin recargar
+- [ ] Los archivos de traducción están en `public/locales/` con la estructura de namespaces correcta
+- [ ] Los números con `Intl.NumberFormat` usan el locale activo de i18n
+
+</Checkpoint>
+
+## Próxima unidad → [Auth en el frontend: tokens y tenant](../auth-frontend/)

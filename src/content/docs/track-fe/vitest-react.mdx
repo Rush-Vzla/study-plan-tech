@@ -1,0 +1,222 @@
+---
+title: 'Vitest + Testing Library para frontend'
+description: 'Tests de hooks y componentes con Vitest y React Testing Library. Mock de TanStack Query. Sin Enzyme, sin snapshot tests masivos.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 3
+prerequisites: ['modulo-0/testing-filosofia', 'track-fe/container-presentational']
+learning_outcomes:
+  - 'Configurar Vitest con jsdom para tests de React'
+  - 'Testear componentes presentationals con Testing Library'
+  - 'Mockear TanStack Query para tests de containers'
+  - 'Testear custom hooks con renderHook'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+  node: '24'
+lab_runnable: false
+sidebar:
+  order: 16
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### Por qué Testing Library en vez de Enzyme
+
+Enzyme te permite acceder a los internos del componente — el estado interno, los métodos, la estructura del árbol. Eso hace que los tests sean frágiles: si refactorizas un componente sin cambiar su comportamiento, los tests fallan.
+
+Testing Library fuerza a testear desde el punto de vista del usuario: ¿qué texto se muestra en pantalla? ¿qué pasa al hacer clic en este botón? Si refactorizas la implementación interna pero el comportamiento externo no cambia, los tests siguen pasando.
+
+Fíjate en la filosofía: un test que pasa después de un refactor es útil. Un test que falla solo porque cambiaste un nombre de variable interno es ruido.
+
+### Sin snapshot tests masivos
+
+Los snapshot tests de Jest/Vitest guardan el HTML renderizado de un componente y fallan cuando cambia. El problema es que cualquier cambio cosmético — agregar una clase de Tailwind, cambiar un texto — hace fallar el snapshot. El equipo empieza a hacer `--update-snapshots` sin revisar qué cambió.
+
+En Rush los snapshot tests están prohibidos para componentes de UI. Se usan solo para output estructurado bien definido (por ejemplo, el output de una función de transformación de datos, no el HTML de un componente).
+
+### Mock de TanStack Query
+
+Los containers usan `useQuery` o `useSuspenseQuery`. Para testear un container sin hacer requests HTTP reales, tienes dos opciones:
+
+- Mockear el módulo completo de TanStack Query — frágil y verboso
+- Envolver el componente con `QueryClientProvider` y un `queryClient` de test — la forma correcta
+
+```tsx
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, gcTime: 0 } },
+});
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  return <QueryClientProvider client={testQueryClient}>{children}</QueryClientProvider>;
+}
+
+render(<SalesContainer />, { wrapper });
+```
+
+Con `retry: false` y `gcTime: 0`, las queries fallan rápido en tests sin tiempos de espera.
+
+## 2. Lab guiado
+
+<LabSpec title="Tests de SalesList y useSales" estimatedMinutes={60} runnable={false}>
+
+Vas a escribir tests para el componente presentational `SalesList` y para el hook `useSales` con mock del API.
+
+### Setup
+
+```bash
+pnpm add -D vitest@3 @testing-library/react@16 @testing-library/jest-dom@6 @testing-library/user-event@14 jsdom@26 msw@2
+```
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'node:path';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    globals: true,
+  },
+  resolve: {
+    alias: { '@': path.resolve(__dirname, './src') },
+  },
+});
+```
+
+```ts
+// src/test/setup.ts
+import '@testing-library/jest-dom';
+```
+
+### Paso 1: tests del componente presentational
+
+```tsx
+// src/features/sales/components/SalesList.test.tsx
+import { render, screen } from '@testing-library/react';
+import { SalesList } from './SalesList';
+import type { Sale } from '../schemas/sale.schema';
+
+const mockSale: Sale = {
+  id: '550e8400-e29b-41d4-a716-446655440000',
+  businessId: '550e8400-e29b-41d4-a716-446655440001',
+  amount: 150.5,
+  currency: 'VES',
+  usdEquivalent: 4.18,
+  createdAt: '2026-05-18T10:00:00Z',
+};
+
+describe('SalesList', () => {
+  it('muestra las ventas disponibles', () => {
+    render(<SalesList sales={[mockSale]} isLoading={false} />);
+    expect(screen.getByText(/150\.50/)).toBeInTheDocument();
+    expect(screen.getByText(/VES/)).toBeInTheDocument();
+  });
+
+  it('muestra mensaje de carga cuando isLoading es true', () => {
+    render(<SalesList sales={[]} isLoading={true} />);
+    expect(screen.getByText(/Cargando/i)).toBeInTheDocument();
+  });
+
+  it('muestra mensaje vacío cuando no hay ventas', () => {
+    render(<SalesList sales={[]} isLoading={false} />);
+    expect(screen.getByText(/no hay ventas/i)).toBeInTheDocument();
+  });
+});
+```
+
+### Paso 2: mock del API con MSW
+
+```ts
+// src/test/handlers.ts
+import { http, HttpResponse } from 'msw';
+
+export const handlers = [
+  http.get('/api/businesses/:businessId/sales', () => {
+    return HttpResponse.json([
+      {
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        businessId: 'biz-001',
+        amount: 200,
+        currency: 'USD',
+        usdEquivalent: 200,
+        createdAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+  }),
+];
+```
+
+```ts
+// src/test/setup.ts
+import '@testing-library/jest-dom';
+import { setupServer } from 'msw/node';
+import { handlers } from './handlers';
+
+const server = setupServer(...handlers);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+```
+
+### Paso 3: test del hook con wrapper de QueryClient
+
+```tsx
+// src/features/sales/hooks/useSales.test.ts
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useSales } from './useSales';
+
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, gcTime: 0 } },
+});
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={testQueryClient}>{children}</QueryClientProvider>
+);
+
+test('carga ventas del API', async () => {
+  const { result } = renderHook(
+    () => useSales(),
+    { wrapper },
+  );
+
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  expect(result.current.data).toHaveLength(1);
+  expect(result.current.data![0].amount).toBe(200);
+});
+```
+
+### Verificación final
+
+```bash
+pnpm test
+```
+
+Todos los tests deben pasar. El tiempo total de los tests presentationals debe ser menor a 500ms. Si tarda más, algo está esperando timeouts de red reales.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="vitest-react">
+
+1. ¿Por qué los snapshot tests de componentes UI son problemáticos en Rush?
+2. ¿Qué hace MSW (Mock Service Worker) que no hace `vi.mock('fetch')`?
+3. ¿Por qué configurar `retry: false` en el `QueryClient` de tests?
+
+- [ ] Los tests de `SalesList` pasan sin ningún mock de TanStack Query ni fetch
+- [ ] Los tests del hook `useSales` usan MSW para interceptar requests de red
+- [ ] `pnpm test` termina en menos de 5 segundos
+
+</Checkpoint>
+
+## Próxima unidad → [Playwright: E2E de flujos monetarios](../playwright-e2e/)

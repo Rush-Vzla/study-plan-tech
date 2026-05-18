@@ -1,0 +1,237 @@
+---
+title: 'Container vs presentational: separar lógica de UI'
+description: 'Hooks en containers, componentes puros en presentational. Por qué este patrón importa en Rush para mantener el código testeable.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/tanstack-query-fundamentos', 'modulo-0/clean-arch-pragmatica']
+learning_outcomes:
+  - 'Distinguir un container de un componente presentational'
+  - 'Extraer un hook de datos de un componente con lógica mixta'
+  - 'Testear componentes presentational sin mocks de TanStack Query'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 14
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### El problema del componente que hace todo
+
+Imagínate este componente:
+
+```tsx
+export function SalesPage() {
+  const { businessId } = useTenant();
+  const { data, isLoading } = useQuery({
+    queryKey: ['tenant', businessId, 'sales'],
+    queryFn: () => fetchSales(businessId!),
+  });
+  const mutation = useMutation({ mutationFn: createSale });
+
+  if (isLoading) return <div>Cargando...</div>;
+
+  return (
+    <div>
+      <h1>Ventas</h1>
+      <ul>
+        {data?.map((sale) => (
+          <li key={sale.id}>
+            {sale.currency} {sale.amount}
+            <button onClick={() => mutation.mutate(sale)}>Duplicar</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+Este componente hace todo: fetching, lógica de negocio y presentación. Para testearlo necesitas mockear TanStack Query, el contexto de tenant, y el fetch. Es complicado.
+
+### Container: la capa de datos y lógica
+
+El container sabe de dónde vienen los datos y qué hacer con ellos. No sabe cómo se ven.
+
+```tsx
+// SalesContainer.tsx (container)
+export function SalesContainer() {
+  const { businessId } = useTenant();
+  const { data = [], isLoading } = useSales();
+  const { mutate: createSale } = useCreateSale(businessId!);
+
+  if (isLoading) return <div>Cargando...</div>;
+
+  return <SalesList sales={data} onDuplicate={createSale} />;
+}
+```
+
+### Presentational: la capa de UI pura
+
+El componente presentational recibe datos y callbacks por props. No sabe de dónde vienen los datos.
+
+```tsx
+// SalesList.tsx (presentational)
+interface SalesListProps {
+  sales: Sale[];
+  onDuplicate: (sale: Sale) => void;
+}
+
+export function SalesList({ sales, onDuplicate }: SalesListProps) {
+  return (
+    <ul>
+      {sales.map((sale) => (
+        <li key={sale.id}>
+          {sale.currency} {sale.amount}
+          <button onClick={() => onDuplicate(sale)}>Duplicar</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Fíjate en qué ganas: `SalesList` se puede testear con datos hardcodeados en props, sin mockear nada. El test es simple:
+
+```tsx
+render(<SalesList sales={[{ id: '1', amount: 100, currency: 'VES' }]} onDuplicate={vi.fn()} />);
+```
+
+### Cuándo aplicar el patrón
+
+No apliques el patrón a ciegas. Si un componente tiene menos de 30 líneas y hace solo una cosa, no lo partas. El patrón vale cuando:
+
+- El componente mezcla lógica de datos con presentación compleja
+- Necesitas reusar la presentación con datos de distintas fuentes
+- El componente es difícil de testear por las dependencias externas
+
+## 2. Lab guiado
+
+<LabSpec title="Separar SalesPage en container y presentational" estimatedMinutes={40} runnable={false}>
+
+Vas a refactorizar `SalesPage` en un container y dos componentes presentationals.
+
+### Paso 1: extraer el componente de lista
+
+```tsx
+// src/features/sales/components/SalesList.tsx
+import type { Sale } from '../schemas/sale.schema';
+
+interface SalesListProps {
+  sales: Sale[];
+  isLoading: boolean;
+}
+
+export function SalesList({ sales, isLoading }: SalesListProps) {
+  if (isLoading) {
+    return <div className="p-4 text-gray-500">Cargando ventas...</div>;
+  }
+
+  if (sales.length === 0) {
+    return <div className="p-4 text-gray-500">No hay ventas registradas.</div>;
+  }
+
+  return (
+    <ul className="divide-y divide-gray-200">
+      {sales.map((sale) => (
+        <li key={sale.id} className="flex items-center justify-between p-4">
+          <span className="font-medium">
+            {sale.currency} {sale.amount.toFixed(2)}
+          </span>
+          <span className="text-sm text-gray-500">
+            {new Date(sale.createdAt).toLocaleDateString('es-VE')}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Paso 2: el container
+
+```tsx
+// src/features/sales/components/SalesContainer.tsx
+import { useSales } from '../hooks/useSales';
+import { SalesList } from './SalesList';
+import { SaleForm } from './SaleForm';
+
+export function SalesContainer() {
+  const { data = [], isLoading } = useSales();
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold">Registrar venta</h2>
+        <SaleForm />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold">Historial</h2>
+        <SalesList sales={data} isLoading={isLoading} />
+      </div>
+    </div>
+  );
+}
+```
+
+### Paso 3: testear SalesList sin mocks de TanStack Query
+
+```tsx
+// src/features/sales/components/SalesList.test.tsx
+import { render, screen } from '@testing-library/react';
+import { SalesList } from './SalesList';
+
+const mockSales = [
+  {
+    id: '1',
+    businessId: 'biz-001',
+    amount: 150.5,
+    currency: 'VES' as const,
+    usdEquivalent: 4.18,
+    createdAt: '2026-05-18T10:00:00Z',
+  },
+];
+
+test('muestra las ventas cuando los datos están disponibles', () => {
+  render(<SalesList sales={mockSales} isLoading={false} />);
+  expect(screen.getByText(/150\.50/)).toBeInTheDocument();
+});
+
+test('muestra mensaje de carga cuando isLoading es true', () => {
+  render(<SalesList sales={[]} isLoading={true} />);
+  expect(screen.getByText(/Cargando/)).toBeInTheDocument();
+});
+```
+
+### Verificación final
+
+```bash
+pnpm test
+```
+
+Los tests de `SalesList` deben pasar sin ningún mock de TanStack Query, axios ni contextos. Si necesitas mocks para el test del presentational, el componente todavía tiene dependencias que no debería tener.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="container-presentational">
+
+1. ¿Cuál es la señal de que un componente necesita ser separado en container y presentational?
+2. ¿Puede el presentational tener estado local (por ejemplo, `useState` para un input de búsqueda)? ¿Por qué?
+3. ¿Dónde van los `useMutation` según este patrón?
+
+- [ ] `SalesList` se testea con datos en props sin ningún mock de TanStack Query
+- [ ] `SalesContainer` no tiene JSX de presentación compleja — solo orquesta hooks y renderiza componentes
+- [ ] Los tests del presentational pasan en menos de 100ms
+
+</Checkpoint>
+
+## Próxima unidad → [Error Boundaries: la UI que no rompe todo](../error-boundaries/)

@@ -1,0 +1,204 @@
+---
+title: 'React + Vite: el proyecto arranca'
+description: 'Scaffold de un proyecto React 19 con Vite, TypeScript strict y path aliases. El punto de partida del frontend de Rush.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['modulo-0/ts-estricto']
+learning_outcomes:
+  - 'Crear un proyecto React 19 + Vite con TypeScript strict desde cero'
+  - 'Configurar path aliases para evitar imports con ../../..'
+  - 'Entender la estructura de carpetas que usa Rush en el frontend'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  react: '19'
+  vite: '6'
+  typescript: '5.8'
+lab_runnable: false
+sidebar:
+  order: 1
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### ¿Por qué Vite y no Create React App?
+
+Create React App está abandonado desde 2023. Vite arranca en milisegundos porque no transpila todo el código en frío — usa ES modules nativos del browser para desarrollo. Para producción hace un bundle optimizado con Rollup.
+
+Fíjate que en Rush el frontend no es una aplicación standalone. Es un cliente HTTP que consume el API de NestJS. Esa distinción importa a la hora de estructurar el proyecto: no hay lógica de negocio en el frontend, solo presentación y orquestación de peticiones.
+
+### TypeScript strict en el frontend
+
+Igual que en el backend, Rush usa `strict: true` en el frontend. Esto activa:
+
+- `noImplicitAny`: no puedes usar `any` sin declararlo explícitamente
+- `strictNullChecks`: `null` y `undefined` son tipos separados
+- `noUncheckedIndexedAccess`: acceder a un array con índice da `T | undefined`, no `T`
+
+Vale, ahora lo importante: si trabajas en un proyecto con `strict: false` y lo activas después, obtienes cientos de errores. En Rush empezamos con strict desde el día uno para no pagar esa deuda después.
+
+### Path aliases — por qué importan
+
+Sin aliases:
+
+```ts
+import { SalesTable } from '../../../features/sales/components/SalesTable';
+```
+
+Con alias `@/`:
+
+```ts
+import { SalesTable } from '@/features/sales/components/SalesTable';
+```
+
+El alias hace que los imports sean absolutos desde la raíz del proyecto. Cuando mueves un archivo de carpeta, los imports no se rompen. Rush usa `@/` como alias estándar para `src/`.
+
+### Estructura de carpetas del frontend de Rush
+
+```text
+src/
+├── features/          <- un directorio por capacidad de negocio
+│   ├── sales/
+│   ├── inventory/
+│   └── auth/
+├── components/        <- componentes UI puramente genéricos (sin lógica de negocio)
+├── hooks/             <- hooks genéricos (no atados a un feature)
+├── lib/               <- configuración de librerías (queryClient, i18n, axios instance)
+├── styles/            <- CSS global y tokens
+└── main.tsx           <- entry point
+```
+
+Los features tienen su propia estructura interna — eso lo cubre la unidad [feature-first](../feature-first/).
+
+## 2. Lab guiado
+
+<LabSpec title="Scaffold React 19 + Vite + TypeScript strict" estimatedMinutes={45} runnable={false}>
+
+En este lab creas el proyecto base del frontend, configuras TypeScript strict y agregas el alias `@/`.
+
+### Setup
+
+```bash
+pnpm create vite@latest rush-frontend -- --template react-ts
+cd rush-frontend
+pnpm install
+```
+
+### Paso 1: verificar la versión de React
+
+```bash
+pnpm list react
+```
+
+Deberías ver `react 19.x`. Si Vite creó el proyecto con React 18, actualiza:
+
+```bash
+pnpm add react@19 react-dom@19
+pnpm add -D @types/react@19 @types/react-dom@19
+```
+
+### Paso 2: activar TypeScript strict
+
+Abre `tsconfig.json` y verifica que tiene `"strict": true`. Vite lo incluye por defecto en el template `react-ts`, pero confirma que también tiene:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+```
+
+### Paso 3: configurar el alias en Vite
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'node:path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+});
+```
+
+Instala el tipo para `path`:
+
+```bash
+pnpm add -D @types/node
+```
+
+### Paso 4: crear la estructura de carpetas
+
+```bash
+mkdir -p src/features/sales
+mkdir -p src/features/auth
+mkdir -p src/components
+mkdir -p src/hooks
+mkdir -p src/lib
+mkdir -p src/styles
+```
+
+### Paso 5: verificar que el alias funciona
+
+Crea un archivo de prueba:
+
+```ts
+// src/lib/config.ts
+export const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+```
+
+Importa desde cualquier otro archivo usando el alias:
+
+```ts
+// src/main.tsx
+import { API_BASE_URL } from '@/lib/config';
+console.log(API_BASE_URL);
+```
+
+### Verificación final
+
+```bash
+pnpm dev
+```
+
+El dev server debe levantar en `http://localhost:5173` sin errores de TypeScript en la consola. Si el alias no funciona, TypeScript va a mostrar un error de módulo no encontrado.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="react-vite-setup">
+
+1. ¿Por qué Vite usa ES modules nativos en desarrollo en vez de transpilar todo?
+2. Si tienes `noUncheckedIndexedAccess: true` y haces `const x = arr[0]`, ¿qué tipo tiene `x` si `arr` es `string[]`?
+3. ¿Qué pasa si defines el alias en `tsconfig.json` pero no en `vite.config.ts`?
+
+- [ ] El proyecto levanta con `pnpm dev` sin errores
+- [ ] `tsconfig.json` tiene `strict: true` y `noUncheckedIndexedAccess: true`
+- [ ] Un import usando `@/` compila y el dev server no muestra error de módulo
+
+</Checkpoint>
+
+## Próxima unidad → [React Router: navegación sin CVEs de supply chain](../react-router/)

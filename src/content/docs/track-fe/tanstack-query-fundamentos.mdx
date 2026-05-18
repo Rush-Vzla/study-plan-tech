@@ -1,0 +1,239 @@
+---
+title: 'TanStack Query: data fetching sin dolor'
+description: 'useQuery, useMutation, invalidación de cache y stale-while-revalidate. Cómo Rush maneja el estado del servidor en el frontend.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 4
+prerequisites: ['track-fe/feature-first']
+learning_outcomes:
+  - 'Configurar QueryClient y QueryClientProvider'
+  - 'Usar useQuery para cargar datos con cache automático'
+  - 'Usar useMutation para operaciones de escritura con invalidación'
+  - 'Entender stale-while-revalidate y cuándo ajustar staleTime'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 4
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### ¿Qué problema resuelve TanStack Query?
+
+Sin TanStack Query, el ciclo de data fetching en React se ve así:
+
+```ts
+const [data, setData] = useState(null);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState(null);
+
+useEffect(() => {
+  setLoading(true);
+  fetch('/api/sales')
+    .then((r) => r.json())
+    .then(setData)
+    .catch(setError)
+    .finally(() => setLoading(false));
+}, []);
+```
+
+Cada componente repite esta lógica. No hay cache. Si dos componentes necesitan los mismos datos, hacen dos requests. Si navegas hacia atrás, los datos se vuelven a cargar desde cero.
+
+TanStack Query centraliza esto en un `QueryClient` que actúa como cache del estado del servidor. Cuando dos componentes piden los mismos datos (misma query key), solo se hace un request.
+
+### El modelo mental: estado del servidor vs. estado del cliente
+
+Fíjate en esta distinción:
+
+- **Estado del cliente**: el valor de un input de búsqueda, si un modal está abierto, el tema (dark/light). Vive en `useState` o en un store como Zustand.
+- **Estado del servidor**: las ventas, el inventario, el perfil del usuario. Vive en el backend y se sincroniza mediante requests HTTP.
+
+TanStack Query es para el estado del servidor, no para el estado del cliente. Ese es el límite.
+
+### stale-while-revalidate
+
+TanStack Query asume que los datos del servidor se vuelven "stale" (desactualizados) después de un tiempo configurable (`staleTime`). Por defecto `staleTime = 0`, lo que significa que los datos son stale inmediatamente. Cuando una query está stale y el componente se monta o la ventana gana foco, TanStack Query la revalida en segundo plano.
+
+El patrón se llama stale-while-revalidate: muestra los datos stale mientras revalida, luego actualiza cuando llega la respuesta fresca. El usuario siempre ve algo, nunca una pantalla en blanco.
+
+Para Rush, la configuración típica es:
+
+```ts
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60, // 1 minuto
+      gcTime: 1000 * 60 * 5, // 5 minutos antes de limpiar del cache
+      retry: 1,
+    },
+  },
+});
+```
+
+### Invalidación después de una mutación
+
+Cuando el usuario registra una venta, el cache de ventas queda stale inmediatamente. TanStack Query tiene un mecanismo explícito para esto:
+
+```ts
+const mutation = useMutation({
+  mutationFn: createSale,
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['tenant', businessId, 'sales'] });
+  },
+});
+```
+
+`invalidateQueries` marca las queries con ese prefijo de key como stale y las revalida si hay componentes suscriptos. El usuario ve los datos actualizados sin recargar la página.
+
+## 2. Lab guiado
+
+<LabSpec title="QueryClient + useQuery + useMutation para ventas" estimatedMinutes={80} runnable={false}>
+
+Vas a configurar TanStack Query en el proyecto y usarlo para listar y crear ventas.
+
+### Setup
+
+```bash
+pnpm add @tanstack/react-query@5
+pnpm add -D @tanstack/react-query-devtools
+```
+
+### Paso 1: configurar QueryClientProvider
+
+```tsx
+// src/lib/queryClient.ts
+import { QueryClient } from '@tanstack/react-query';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60,
+      gcTime: 1000 * 60 * 5,
+      retry: 1,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
+```
+
+```tsx
+// src/main.tsx
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { queryClient } from '@/lib/queryClient';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
+  </StrictMode>,
+);
+```
+
+### Paso 2: useQuery para listar ventas
+
+```tsx
+// src/features/sales/hooks/useSales.ts
+import { useQuery } from '@tanstack/react-query';
+import { fetchSales } from '../api/sales.api';
+
+export function useSales(businessId: string) {
+  return useQuery({
+    queryKey: ['tenant', businessId, 'sales'],
+    queryFn: () => fetchSales(businessId),
+    enabled: !!businessId,
+  });
+}
+```
+
+```tsx
+// src/features/sales/components/SalesPage.tsx
+import { useSales } from '../hooks/useSales';
+
+export function SalesPage({ businessId }: { businessId: string }) {
+  const { data = [], isLoading, error } = useSales(businessId);
+
+  if (isLoading) return <div>Cargando...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return (
+    <ul>
+      {data.map((sale) => (
+        <li key={sale.id}>
+          {sale.currency} {sale.amount}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Paso 3: useMutation para crear una venta
+
+```ts
+// src/features/sales/api/sales.api.ts
+export async function createSale(payload: {
+  businessId: string;
+  amount: number;
+  currency: 'VES' | 'USD';
+}): Promise<Sale> {
+  const response = await fetch(`/api/businesses/${payload.businessId}/sales`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('Failed to create sale');
+  return saleSchema.parse(await response.json());
+}
+```
+
+```tsx
+// src/features/sales/hooks/useCreateSale.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { createSale } from '../api/sales.api';
+
+export function useCreateSale(businessId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: createSale,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant', businessId, 'sales'] });
+    },
+  });
+}
+```
+
+### Verificación final
+
+Abre el React Query Devtools (el icono flotante en dev). Debes ver:
+
+- La query `['tenant', <businessId>, 'sales']` en estado `success` o `loading`
+- Al ejecutar la mutación, la query de ventas cambia a estado `fetching` (revalidación)
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="tanstack-query-fundamentos">
+
+1. ¿Qué diferencia hay entre `staleTime` y `gcTime` en TanStack Query?
+2. Si dos componentes distintos usan `useSales(businessId)` con el mismo `businessId`, ¿cuántos requests HTTP se hacen? ¿Por qué?
+3. ¿Por qué `enabled: !!businessId` es importante en el hook de ventas?
+
+- [ ] `QueryClientProvider` envuelve el árbol de la aplicación correctamente
+- [ ] `useSales` muestra los datos cuando la query tiene éxito
+- [ ] `useCreateSale` invalida el cache de ventas después de una mutación exitosa
+- [ ] El React Query Devtools es visible en modo desarrollo
+
+</Checkpoint>
+
+## Próxima unidad → [Tenant-aware query keys: el cache que no miente](../tanstack-query-tenant-aware/)

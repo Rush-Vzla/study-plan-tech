@@ -1,0 +1,186 @@
+---
+title: 'Performance frontend sin obsesionarse'
+description: 'Code splitting, lazy loading, memoización cuando tiene sentido y Lighthouse básico. Cuándo optimizar y cuándo no.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/react-vite-setup', 'track-fe/tanstack-query-fundamentos']
+learning_outcomes:
+  - 'Aplicar code splitting con React.lazy y Suspense'
+  - 'Usar useMemo y useCallback solo cuando hay evidencia de problema'
+  - 'Interpretar un reporte de Lighthouse para identificar mejoras reales'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+  vite: '6'
+lab_runnable: false
+sidebar:
+  order: 18
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### Optimizar sin evidencia es deuda
+
+Lo más común que hacen los devs sin experiencia en performance es agregar `useMemo` y `useCallback` en todos lados "por las dudas". Eso no mejora el performance — agrega costo de memoria y hace el código más difícil de leer.
+
+La regla en Rush: si no puedes medir el problema, no lo "optimices". Primero mide, luego actúa.
+
+Las herramientas para medir son:
+
+- React DevTools → Profiler: muestra qué componentes se renderizan y cuánto tardan
+- Chrome DevTools → Performance: muestra el tiempo de JS, layout y paint
+- Lighthouse: puntaje de performance con métricas concretas (LCP, CLS, FID)
+
+### Code splitting con React.lazy
+
+Vite hace bundle splitting automático por rutas cuando usas `React.lazy`. El chunk de la ruta se carga solo cuando el usuario navega ahí.
+
+```tsx
+const SalesPage = React.lazy(() => import('@/features/sales/components/SalesPage'));
+const InventoryPage = React.lazy(() => import('@/features/inventory/components/InventoryPage'));
+```
+
+El tamaño del bundle inicial baja porque no incluye el código de todas las rutas. El usuario carga solo lo que necesita.
+
+### Cuándo usar useMemo y useCallback
+
+`useMemo` evita recalcular un valor en cada render. Úsalo cuando:
+
+- El cálculo es genuinamente costoso (más de 1ms medido en Profiler)
+- El resultado se pasa como prop a un componente memorizado con `React.memo`
+
+No uses `useMemo` para:
+
+- Arrays o objetos creados inline en cada render (el costo de la memoización supera el de la creación)
+- Valores primitivos (strings, números)
+- Cálculos triviales (`.filter`, `.map` sobre listas pequeñas)
+
+`useCallback` es `useMemo` para funciones. Úsalo solo cuando la función se pasa como prop a un componente memorizado o como dependencia de otro hook.
+
+### LCP, CLS y FID en Lighthouse
+
+Los tres métricas más importantes de Lighthouse para Rush:
+
+- **LCP (Largest Contentful Paint)**: cuánto tarda en renderizarse el elemento más grande visible. Meta: menos de 2.5 segundos.
+- **CLS (Cumulative Layout Shift)**: cuánto se mueve el layout mientras carga. Meta: menos de 0.1. Los layout shifts molestos (el botón que se mueve cuando carga una imagen) bajan este score.
+- **FID/INP (Interaction to Next Paint)**: cuánto tarda el browser en responder al primer clic del usuario. Meta: menos de 200ms.
+
+Para Rush, el target es LCP menor a 2.5s y CLS menor a 0.1. El resto es nice-to-have.
+
+## 2. Lab guiado
+
+<LabSpec title="Code splitting por ruta y medición con Lighthouse" estimatedMinutes={40} runnable={false}>
+
+Vas a aplicar code splitting a las rutas de la aplicación y medir el impacto con Lighthouse.
+
+### Paso 1: lazy loading de las rutas
+
+```tsx
+// src/main.tsx
+import { lazy, Suspense } from 'react';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+
+const SalesPage = lazy(() => import('@/features/sales/components/SalesPage'));
+const InventoryPage = lazy(() => import('@/features/inventory/components/InventoryPage'));
+
+const router = createBrowserRouter([
+  {
+    path: '/app',
+    element: (
+      <AuthGuard>
+        <AppLayout />
+      </AuthGuard>
+    ),
+    children: [
+      {
+        path: 'sales',
+        element: (
+          <Suspense fallback={<LoadingSpinner />}>
+            <SalesPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'inventory',
+        element: (
+          <Suspense fallback={<LoadingSpinner />}>
+            <InventoryPage />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+]);
+```
+
+### Paso 2: verificar el code splitting
+
+```bash
+pnpm build
+```
+
+En la salida de Vite, busca los chunks. Antes del splitting vas a ver un solo chunk grande. Después, debes ver chunks separados para cada ruta:
+
+```text
+dist/assets/SalesPage-abc123.js     45.2 kB
+dist/assets/InventoryPage-def456.js 38.7 kB
+dist/assets/index-ghi789.js         120.3 kB
+```
+
+### Paso 3: Lighthouse en el build de producción
+
+```bash
+pnpm preview
+```
+
+Abre Chrome → DevTools → Lighthouse → solo "Performance" → Generate report.
+
+Revisa:
+
+- LCP: ¿menor a 2.5s?
+- CLS: ¿menor a 0.1?
+- Opportunities: ¿hay imágenes sin tamaño declarado? ¿recursos bloqueantes?
+
+### Paso 4: memoización con evidencia
+
+Si el Profiler de React muestra que un componente tarda más de 16ms en renderizar (lo que haría fallar 60fps), considera `React.memo`:
+
+```tsx
+// Solo si el Profiler muestra que SalesList re-renderiza innecesariamente
+export const SalesList = React.memo(function SalesList({ sales, isLoading }: SalesListProps) {
+  // ...
+});
+```
+
+Sin evidencia del Profiler, no lo agregues.
+
+### Verificación final
+
+```bash
+pnpm build && pnpm preview
+```
+
+El reporte de Lighthouse debe mostrar LCP menor a 3s en tu máquina local. Si es mayor, revisa las "Opportunities" — generalmente el problema es una imagen sin tamaño declarado o un recurso de terceros bloqueante.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="performance-fe">
+
+1. ¿Por qué agregar `useMemo` sin evidencia de un problema puede empeorar el performance?
+2. ¿Qué pasa en el Network tab cuando el usuario navega a `/app/sales` después de aplicar code splitting?
+3. ¿Cuál es el número de LCP que Rush considera aceptable y por qué?
+
+- [ ] El build genera chunks separados por ruta (visible en la salida de `pnpm build`)
+- [ ] La aplicación carga el chunk de `SalesPage` solo cuando el usuario navega a esa ruta
+- [ ] El reporte de Lighthouse muestra LCP menor a 3s en local
+
+</Checkpoint>
+
+## Próxima unidad → [CSP y CORS desde el frontend](../csp-cors-frontend/)

@@ -1,0 +1,205 @@
+---
+title: 'shadcn/ui: componentes que son tuyos'
+description: 'Por qué shadcn copia los componentes al proyecto en vez de instalarlos como paquete. Cómo agregar y customizar componentes de forma segura en Rush.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 3
+prerequisites: ['track-fe/tailwind-styling']
+learning_outcomes:
+  - 'Entender el modelo "copy into project" de shadcn/ui'
+  - 'Agregar y usar componentes como Button, Dialog y Table'
+  - 'Customizar sin tocar los archivos de shadcn directamente'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+  node: '24'
+lab_runnable: false
+sidebar:
+  order: 8
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### El modelo "copy into project"
+
+La mayoría de las librerías de componentes se instalan como dependencias npm: instalas, importas, listo. El problema es que no puedes cambiar el código interno sin hacer un fork de la librería.
+
+shadcn/ui funciona distinto: `npx shadcn add button` copia el código del componente Button directamente a `src/components/ui/button.tsx`. El componente es tuyo. Puedes modificarlo como quieras.
+
+Fíjate qué implica esto:
+
+- No hay `@shadcn/ui` en tu `package.json` — las dependencias que necesita cada componente (Radix UI, class-variance-authority, etc.) sí se instalan
+- shadcn es un generador de código, no una librería
+- Cuando actualiza shadcn, tienes que correr el comando de nuevo y hacer merge manual de los cambios con tus customizaciones
+
+### La zona "no-touch" en Rush
+
+En Rush existe una convención: los archivos en `src/components/ui/` generados por shadcn son la zona "no-touch". No los editas directamente.
+
+Si necesitas un `Button` con comportamiento distinto, creas un wrapper:
+
+```tsx
+// src/components/Button.tsx  <- wrapper de Rush
+import { Button as ShadcnButton } from '@/components/ui/button';
+import type { ComponentProps } from 'react';
+
+interface RushButtonProps extends ComponentProps<typeof ShadcnButton> {
+  loading?: boolean;
+}
+
+export function Button({ loading, disabled, children, ...props }: RushButtonProps) {
+  return (
+    <ShadcnButton disabled={loading || disabled} {...props}>
+      {loading ? 'Cargando...' : children}
+    </ShadcnButton>
+  );
+}
+```
+
+Así cuando shadcn actualiza `button.tsx`, no pierdes tus cambios.
+
+### ¿Por qué Radix UI como base?
+
+shadcn usa Radix UI Primitives como base de los componentes interactivos (Dialog, Select, Tooltip, etc.). Radix maneja accesibilidad (ARIA, focus management, keyboard navigation) de forma correcta. Tú agregas los estilos con Tailwind, Radix pone la semántica.
+
+Eso significa que cuando usas `<Dialog>` de shadcn, el atributo `role="dialog"`, el `aria-labelledby`, el trap de foco — todo funciona sin que tengas que pensarlo.
+
+## 2. Lab guiado
+
+<LabSpec title="Instalar shadcn y agregar Button, Dialog y Table" estimatedMinutes={60} runnable={false}>
+
+Vas a configurar shadcn en el proyecto y agregar los componentes que Rush usa en el módulo de ventas.
+
+### Setup
+
+```bash
+npx shadcn@latest init
+```
+
+El CLI te va a preguntar:
+
+- Framework: React (Vite)
+- Style: Default
+- Color: Neutral (puedes cambiar después)
+- CSS variables: yes
+- Tailwind config: yes
+- Components alias: `@/components`
+- Utils alias: `@/lib/utils`
+- React Server Components: no
+
+Luego agrega los componentes:
+
+```bash
+npx shadcn@latest add button
+npx shadcn@latest add dialog
+npx shadcn@latest add table
+```
+
+### Paso 1: verificar los archivos generados
+
+```bash
+ls src/components/ui/
+```
+
+Debes ver: `button.tsx`, `dialog.tsx`, `table.tsx`.
+
+Abre `src/components/ui/button.tsx` — verás que usa `cva` (class-variance-authority) para las variantes de estilo y `Slot` de Radix para la prop `asChild`.
+
+### Paso 2: crear el wrapper de Rush para Button
+
+```tsx
+// src/components/Button.tsx
+import { Button as ShadcnButton } from '@/components/ui/button';
+import type { ComponentProps } from 'react';
+
+interface ButtonProps extends ComponentProps<typeof ShadcnButton> {
+  loading?: boolean;
+}
+
+export function Button({ loading = false, disabled, children, ...props }: ButtonProps) {
+  return (
+    <ShadcnButton disabled={loading || disabled} {...props}>
+      {loading ? 'Procesando...' : children}
+    </ShadcnButton>
+  );
+}
+```
+
+### Paso 3: usar Dialog para confirmar una acción
+
+```tsx
+// src/features/sales/components/DeleteSaleDialog.tsx
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/Button';
+
+interface DeleteSaleDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+export function DeleteSaleDialog({ open, onClose, onConfirm }: DeleteSaleDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>¿Eliminar esta venta?</DialogTitle>
+        </DialogHeader>
+        <p>Esta acción no se puede deshacer.</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            Eliminar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+### Verificación final
+
+```bash
+pnpm dev
+```
+
+Renderiza el `DeleteSaleDialog` con `open={true}`. El dialog debe:
+
+- Mostrarse con un overlay oscuro
+- Tener foco en el primer elemento interactivo al abrir
+- Cerrarse con `Escape`
+- Retornar el foco al elemento que lo abrió al cerrarse
+
+Si cualquiera de esos cuatro puntos no funciona, Radix no está funcionando correctamente.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="shadcn-ui">
+
+1. ¿Por qué shadcn copia el código al proyecto en vez de instalarse como dependencia npm?
+2. ¿Qué es la zona "no-touch" de `src/components/ui/` y cuándo la rompes legítimamente?
+3. ¿Qué hace `asChild` en los componentes de Radix/shadcn?
+
+- [ ] `npx shadcn init` corrió sin errores y generó `components.json`
+- [ ] Los tres componentes (Button, Dialog, Table) están en `src/components/ui/`
+- [ ] El wrapper `Button` de Rush maneja la prop `loading` sin modificar el shadcn original
+- [ ] El Dialog maneja foco y cierre con Escape correctamente
+
+</Checkpoint>
+
+## Próxima unidad → [Tailwind: styling sin CSS-in-JS](../tailwind-styling/)

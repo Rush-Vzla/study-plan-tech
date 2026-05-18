@@ -1,0 +1,264 @@
+---
+title: 'TanStack Table: tablas tipadas y potentes'
+description: 'Column definitions tipadas, sorting, filtering, paginación server-side e integración con TanStack Query para las tablas de Rush.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 3
+prerequisites: ['track-fe/tanstack-query-fundamentos']
+learning_outcomes:
+  - 'Definir columnas tipadas con ColumnDef'
+  - 'Implementar sorting y filtering local y server-side'
+  - 'Conectar TanStack Table con TanStack Query para paginación'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 6
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### ¿Por qué TanStack Table y no una tabla HTML manual?
+
+Las tablas de Rush tienen requisitos que una tabla HTML manual no cubre bien:
+
+- Sorting por múltiples columnas
+- Filtering con debounce
+- Paginación server-side (no puedes cargar 10.000 ventas en el cliente)
+- Columnas fijas, columnas con render custom
+
+TanStack Table es headless — no te da estilos, solo la lógica. Tú renderizas con el HTML que quieras. Eso significa que funciona con shadcn/ui, con Tailwind, con cualquier sistema de diseño.
+
+### Column definitions tipadas
+
+La clave de TanStack Table es que las columnas se definen con el tipo de los datos:
+
+```ts
+import { createColumnHelper } from '@tanstack/react-table';
+import type { Sale } from '@/features/sales/schemas/sale.schema';
+
+const columnHelper = createColumnHelper<Sale>();
+
+const columns = [
+  columnHelper.accessor('amount', {
+    header: 'Monto',
+    cell: (info) => `${info.row.original.currency} ${info.getValue()}`,
+  }),
+  columnHelper.accessor('createdAt', {
+    header: 'Fecha',
+    cell: (info) => new Date(info.getValue()).toLocaleDateString('es-VE'),
+  }),
+];
+```
+
+El tipo `Sale` hace que TypeScript te avise si intentas acceder a un campo que no existe.
+
+### Sorting y filtering
+
+TanStack Table maneja el estado de sorting y filtering, pero el origen de los datos puede ser local (en el cliente) o remoto (paginación server-side).
+
+Para Rush, las ventas usan paginación server-side porque pueden ser miles de registros. El estado de sorting y filtering se pasa como parámetros a la query del API.
+
+### Integración con TanStack Query
+
+El patrón es:
+
+1. El estado de la tabla (página, sort, filtro) vive en `useState`
+2. Ese estado forma parte de la query key de TanStack Query
+3. Cuando el usuario cambia la página, TanStack Query hace un nuevo request con los parámetros actualizados
+
+```ts
+queryKey: ['tenant', businessId, 'sales', { page, sort, filter }]
+```
+
+## 2. Lab guiado
+
+<LabSpec title="Tabla de ventas con paginación y sorting" estimatedMinutes={60} runnable={false}>
+
+Vas a crear una tabla de ventas con sorting por fecha y paginación.
+
+### Setup
+
+```bash
+pnpm add @tanstack/react-table@8
+```
+
+### Paso 1: definir las columnas
+
+```ts
+// src/features/sales/components/sales.columns.ts
+import { createColumnHelper } from '@tanstack/react-table';
+import type { Sale } from '../schemas/sale.schema';
+
+const columnHelper = createColumnHelper<Sale>();
+
+export const salesColumns = [
+  columnHelper.accessor('createdAt', {
+    header: 'Fecha',
+    cell: (info) => new Date(info.getValue()).toLocaleDateString('es-VE'),
+    enableSorting: true,
+  }),
+  columnHelper.accessor('amount', {
+    header: 'Monto',
+    cell: (info) => {
+      const row = info.row.original;
+      return `${row.currency} ${row.amount.toFixed(2)}`;
+    },
+    enableSorting: true,
+  }),
+  columnHelper.accessor('usdEquivalent', {
+    header: 'Equivalente USD',
+    cell: (info) => `USD ${info.getValue().toFixed(2)}`,
+    enableSorting: false,
+  }),
+];
+```
+
+### Paso 2: hook de ventas con paginación
+
+```ts
+// src/features/sales/hooks/useSalesPaginated.ts
+import { useQuery } from '@tanstack/react-query';
+import { useTenant } from '@/features/auth/TenantContext';
+
+interface SalesQueryParams {
+  page: number;
+  pageSize: number;
+  sortBy: string;
+  sortDir: 'asc' | 'desc';
+}
+
+export function useSalesPaginated(params: SalesQueryParams) {
+  const { businessId } = useTenant();
+
+  return useQuery({
+    queryKey: ['tenant', businessId, 'sales', params],
+    queryFn: async () => {
+      const url = new URL(`/api/businesses/${businessId}/sales`, window.location.origin);
+      url.searchParams.set('page', String(params.page));
+      url.searchParams.set('pageSize', String(params.pageSize));
+      url.searchParams.set('sortBy', params.sortBy);
+      url.searchParams.set('sortDir', params.sortDir);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch sales');
+      return res.json() as Promise<{ data: Sale[]; total: number }>;
+    },
+    enabled: !!businessId,
+    placeholderData: (prev) => prev,
+  });
+}
+```
+
+### Paso 3: componente de tabla
+
+```tsx
+// src/features/sales/components/SalesTable.tsx
+import { useState } from 'react';
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  type SortingState,
+} from '@tanstack/react-table';
+import { salesColumns } from './sales.columns';
+import { useSalesPaginated } from '../hooks/useSalesPaginated';
+
+export function SalesTable() {
+  const [page, setPage] = useState(0);
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }]);
+
+  const currentSort = sorting[0];
+  const { data, isLoading } = useSalesPaginated({
+    page,
+    pageSize: 20,
+    sortBy: currentSort?.id ?? 'createdAt',
+    sortDir: currentSort?.desc ? 'desc' : 'asc',
+  });
+
+  const table = useReactTable({
+    data: data?.data ?? [],
+    columns: salesColumns,
+    getCoreRowModel: getCoreRowModel(),
+    manualSorting: true,
+    manualPagination: true,
+    rowCount: data?.total ?? 0,
+    state: { sorting, pagination: { pageIndex: page, pageSize: 20 } },
+    onSortingChange: setSorting,
+    onPaginationChange: (updater) => {
+      const next = typeof updater === 'function' ? updater({ pageIndex: page, pageSize: 20 }) : updater;
+      setPage(next.pageIndex);
+    },
+  });
+
+  if (isLoading) return <div>Cargando...</div>;
+
+  return (
+    <div>
+      <table>
+        <thead>
+          {table.getHeaderGroups().map((hg) => (
+            <tr key={hg.id}>
+              {hg.headers.map((header) => (
+                <th
+                  key={header.id}
+                  onClick={header.column.getToggleSortingHandler()}
+                  style={{ cursor: header.column.getCanSort() ? 'pointer' : 'default' }}
+                >
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                  {header.column.getIsSorted() === 'asc' ? ' ↑' : ''}
+                  {header.column.getIsSorted() === 'desc' ? ' ↓' : ''}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id}>
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div>
+        <button onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+          Anterior
+        </button>
+        <span>Página {page + 1}</span>
+        <button onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+          Siguiente
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### Verificación final
+
+La tabla debe renderizar las ventas, permitir hacer clic en el header de "Fecha" o "Monto" para ordenar, y mostrar los botones de paginación activos o desactivados según la posición actual.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="tanstack-table">
+
+1. ¿Por qué TanStack Table usa el patrón headless en vez de darte una tabla ya estilizada?
+2. ¿Cuál es la diferencia entre paginación local (`getPaginationRowModel`) y paginación server-side (`manualPagination: true`)?
+3. ¿Por qué el estado de sorting forma parte de la query key de TanStack Query?
+
+- [ ] Las columnas están definidas con `createColumnHelper` y tipos correctos
+- [ ] El sorting cambia los parámetros del request al API (visible en el Network tab)
+- [ ] La paginación desactiva el botón "Anterior" en la primera página y "Siguiente" en la última
+
+</Checkpoint>
+
+## Próxima unidad → [TanStack Virtual: listas largas sin lag](../tanstack-virtual/)

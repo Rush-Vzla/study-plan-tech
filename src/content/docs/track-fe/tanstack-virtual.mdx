@@ -1,0 +1,188 @@
+---
+title: 'TanStack Virtual: listas largas sin lag'
+description: 'Virtualización de listas con TanStack Virtual. Cuándo usarla, cuándo no, y cómo integrarla con TanStack Query en Rush.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/tanstack-query-fundamentos']
+learning_outcomes:
+  - 'Entender cuándo la virtualización resuelve un problema real'
+  - 'Implementar una lista virtualizada con useVirtualizer'
+  - 'Calcular el tamaño estimado de fila para evitar saltos de scroll'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 7
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### ¿Qué problema resuelve la virtualización?
+
+El browser renderiza un nodo DOM por cada elemento de una lista. Si tienes 5.000 filas de un historial de eventos, el browser crea 5.000 nodos. El scroll se vuelve lento porque el motor de layout tiene que calcular la posición de cada nodo.
+
+La virtualización resuelve esto renderizando solo los elementos visibles en pantalla (más un pequeño buffer). Si el viewport muestra 20 filas y tienes 5.000, solo existen 25-30 nodos DOM en cualquier momento. El usuario scrollea, los nodos se reusan.
+
+### Cuándo usarla y cuándo no
+
+Fíjate que la virtualización agrega complejidad. No la uses por default.
+
+Úsala cuando:
+
+- La lista tiene más de 200-300 elementos visibles a la vez en el cliente
+- El scroll ya es notablemente lento sin virtualización
+- No puedes usar paginación server-side (por ejemplo, un dropdown de búsqueda que muestra todos los resultados en tiempo real)
+
+No la uses cuando:
+
+- La lista tiene menos de 200 elementos — la paginación es suficiente y más simple
+- Estás usando TanStack Table con paginación server-side — ya resolviste el problema por otro lado
+- El componente necesita accesibilidad avanzada con lectores de pantalla — la virtualización puede romper el foco
+
+### El principio de funcionamiento
+
+TanStack Virtual calcula qué elementos son visibles dado el scroll actual y el tamaño de cada elemento. Te da un arreglo de items virtuales con su `index` y su posición `start` en píxeles. Tú posicionas el contenedor con `height = totalSize` y cada item con `transform: translateY(start)`.
+
+```text
+contenedor height = totalSize (ej: 50.000px para 5.000 filas × 10px)
+  ├── item visible 0 → translateY(0)
+  ├── item visible 1 → translateY(10px)
+  ├── item visible 2 → translateY(20px)
+  └── ... (solo ~25 items renderizados)
+```
+
+## 2. Lab guiado
+
+<LabSpec title="Lista virtualizada de eventos de venta" estimatedMinutes={40} runnable={false}>
+
+Vas a crear una lista virtualizada para mostrar el historial completo de eventos de venta de un negocio.
+
+### Setup
+
+```bash
+pnpm add @tanstack/react-virtual@3
+```
+
+### Paso 1: hook de datos (todos los eventos sin paginar)
+
+```ts
+// src/features/sales/hooks/useSalesEvents.ts
+import { useQuery } from '@tanstack/react-query';
+import { useTenant } from '@/features/auth/TenantContext';
+
+interface SalesEvent {
+  id: string;
+  type: string;
+  amount: number;
+  currency: string;
+  createdAt: string;
+}
+
+export function useSalesEvents() {
+  const { businessId } = useTenant();
+
+  return useQuery({
+    queryKey: ['tenant', businessId, 'sales-events'],
+    queryFn: async () => {
+      const res = await fetch(`/api/businesses/${businessId}/sales-events`);
+      if (!res.ok) throw new Error('Failed to fetch events');
+      return res.json() as Promise<SalesEvent[]>;
+    },
+    enabled: !!businessId,
+  });
+}
+```
+
+### Paso 2: componente con virtualización
+
+```tsx
+// src/features/sales/components/SalesEventList.tsx
+import { useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useSalesEvents } from '../hooks/useSalesEvents';
+
+export function SalesEventList() {
+  const { data = [], isLoading } = useSalesEvents();
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: data.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 56,
+    overscan: 5,
+  });
+
+  if (isLoading) return <div>Cargando eventos...</div>;
+
+  return (
+    <div
+      ref={parentRef}
+      style={{ height: '400px', overflow: 'auto' }}
+    >
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: 'relative',
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const event = data[virtualItem.index];
+          return (
+            <div
+              key={virtualItem.key}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: `${virtualItem.size}px`,
+                transform: `translateY(${virtualItem.start}px)`,
+                display: 'flex',
+                alignItems: 'center',
+                borderBottom: '1px solid #eee',
+                padding: '0 1rem',
+              }}
+            >
+              <span>{event.type}</span>
+              <span style={{ marginLeft: 'auto' }}>
+                {event.currency} {event.amount.toFixed(2)}
+              </span>
+              <span style={{ marginLeft: '1rem', color: '#888', fontSize: '0.875rem' }}>
+                {new Date(event.createdAt).toLocaleDateString('es-VE')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+```
+
+### Verificación final
+
+Abre el DevTools del browser, tab Elements. Mientras scrolleas por la lista con 1.000+ eventos, el número de nodos DOM hijos del contenedor debe mantenerse constante (alrededor de 15-20, dependiendo del `overscan`). Si el número de nodos crece con el scroll, la virtualización no está funcionando.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="tanstack-virtual">
+
+1. ¿Por qué el contenedor necesita un `height` fijo en píxeles para que la virtualización funcione?
+2. Si tus filas tienen altura variable (algunas tienen una línea, otras tres), ¿cómo manejas `estimateSize`?
+3. ¿En qué escenario preferirías paginación server-side sobre virtualización?
+
+- [ ] El contenedor virtualizado tiene `height` fijo y `overflow: auto`
+- [ ] El número de nodos DOM renderizados es constante mientras scrolleas (verificado en DevTools)
+- [ ] Al cambiar de tenant, la lista se limpia y revalida correctamente
+
+</Checkpoint>
+
+## Próxima unidad → [shadcn/ui: componentes que son tuyos](../shadcn-ui/)

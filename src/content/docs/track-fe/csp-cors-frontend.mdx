@@ -1,0 +1,194 @@
+---
+title: 'CSP y CORS desde el frontend'
+description: 'Por qué CSP protege, qué significa CORS en la práctica y los errores más comunes que vive un dev frontend de Rush.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/auth-frontend']
+learning_outcomes:
+  - 'Entender qué hace CSP y por qué el backend lo configura'
+  - 'Diagnosticar y resolver errores de CORS comunes'
+  - 'Saber cuándo un error de CORS es un bug del frontend y cuándo del backend'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 19
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### CSP: el guard que protege contra XSS
+
+Content Security Policy es un header HTTP que el servidor envía y que le dice al browser qué recursos puede cargar y de dónde.
+
+Sin CSP, si alguien logra inyectar un script en tu página (XSS), ese script puede ejecutarse y hacer peticiones a cualquier servidor, leer cookies, robar sesiones. Con CSP bien configurada, el browser bloquea cualquier script que no venga de una fuente autorizada.
+
+La configuración la pone el backend (o Caddy). Desde el frontend no puedes configurar CSP directamente. Lo que sí puedes hacer:
+
+- Entender los errores de CSP en la consola para reportarlos correctamente al DevOps
+- Escribir código que sea compatible con una CSP estricta (sin scripts dinámicos ni HTML sin sanitizar)
+
+Un error de CSP en la consola se ve así:
+
+```text
+Refused to load the script 'https://evil.example.com/tracker.js'
+because it violates the following Content Security Policy directive:
+"script-src 'self'"
+```
+
+Fíjate que este error en producción puede significar que alguien intentó inyectar un script. No lo ignores — repórtalo.
+
+### CORS: la restricción de same-origin
+
+Same-origin policy es una restricción del browser: un script en `https://app.somosrush.io` no puede hacer requests a `https://api.somosrush.io` por default.
+
+CORS (Cross-Origin Resource Sharing) es el mecanismo para relajar esa restricción de forma controlada. El servidor (backend NestJS) configura qué orígenes pueden hacer requests.
+
+El error típico en el frontend:
+
+```text
+Access to fetch at 'https://api.somosrush.io/sales' from origin
+'https://app.somosrush.io' has been blocked by CORS policy:
+No 'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+Esto significa que el backend no incluyó el header `Access-Control-Allow-Origin: https://app.somosrush.io` en la respuesta.
+
+### ¿Cuándo es un bug del frontend y cuándo del backend?
+
+Un error de CORS siempre es un error del backend o del servidor, nunca del frontend. El browser bloquea el request porque el servidor no autorizó el origen. El frontend no puede arreglar CORS por su cuenta.
+
+Lo que sí puede hacer el frontend:
+
+- En desarrollo: configurar el proxy de Vite para que los requests pasen por el mismo origen
+- En producción: usar el mismo dominio (o subdominio) para el frontend y el backend para evitar CORS completamente
+
+### Vite proxy en desarrollo
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
+});
+```
+
+Con este proxy, los requests a `/api/*` en el dev server de Vite se redirigen al backend sin pasar por el browser. CORS no aplica porque el browser ve todo como mismo origen.
+
+### HTTPS-only en producción
+
+Rush usa HTTPS-only. Los cookies `HttpOnly` con `Secure: true` solo se envían por HTTPS. Si alguna parte de la app carga por HTTP, el cookie no se envía y la autenticación falla.
+
+La regla es simple: si algo no funciona en producción y sí en desarrollo, revisa si la URL es HTTP o HTTPS.
+
+## 2. Lab guiado
+
+<LabSpec title="Configurar proxy de Vite y diagnosticar errores de CORS" estimatedMinutes={40} runnable={false}>
+
+Vas a configurar el proxy de Vite para desarrollo y practicar el diagnóstico de errores de CORS.
+
+### Paso 1: configurar el proxy de Vite
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import path from 'node:path';
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { '@': path.resolve(__dirname, './src') },
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
+});
+```
+
+Con esta config, `fetch('/api/sales')` en el frontend pasa por Vite al backend en el port 3000. No hay CORS porque el browser solo ve `localhost:5173`.
+
+### Paso 2: verificar que el proxy funciona
+
+```bash
+pnpm dev
+```
+
+Abre DevTools → Network. Haz un request al API. La URL del request debe mostrar `http://localhost:5173/api/...` (no `http://localhost:3000/api/...`). El status debe ser el mismo que devuelve el backend.
+
+### Paso 3: diagnosticar un error de CORS real
+
+Apaga el proxy momentáneamente cambiando el baseURL del fetch directamente:
+
+```ts
+// temporal — solo para ver el error, reviértelo después
+const response = await fetch('http://localhost:3000/api/sales', {
+  credentials: 'include',
+});
+```
+
+En la consola verás el error de CORS. Identifica:
+
+- El origen del request (el frontend)
+- El origen objetivo (el backend)
+- Qué header falta en la respuesta
+
+Esto es lo que tienes que reportar al DevOps o al backend para que configuren CORS correctamente. Revierte el cambio después.
+
+### Paso 4: buenas prácticas de contenido para CSP
+
+CSP es más estricta cuando el código genera scripts o estilos dinámicamente. Las prácticas que Rush sigue para ser compatible con CSP estricta:
+
+- Siempre usar `element.textContent` para insertar texto del usuario, nunca `innerHTML`
+- No cargar scripts de CDNs externos sin agregarlos a la whitelist de CSP
+- No insertar estilos con strings dinámicos en atributos `style`
+- React ya escapa el contenido del JSX automáticamente — no intentes bypassearlo
+
+Si necesitas renderizar HTML del servidor (por ejemplo, descripción con formato rico), usa una librería de sanitización como DOMPurify primero. No renderices HTML arbitrario directamente.
+
+### Verificación final
+
+```bash
+pnpm build && pnpm preview
+```
+
+En el preview de producción, todos los requests a `/api/*` deben funcionar correctamente. Si el backend está en el mismo servidor (docker-compose en el Droplet), no hay problema de CORS porque frontend y backend comparten el mismo origen a través de Caddy.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="csp-cors-frontend">
+
+1. ¿Por qué un error de CORS nunca es un bug del frontend?
+2. ¿Qué hace `changeOrigin: true` en el proxy de Vite?
+3. Si en producción los cookies no se envían con los requests al API, ¿qué revisarías primero?
+
+- [ ] El proxy de Vite redirige `/api/*` al backend sin errores de CORS en el Network tab
+- [ ] Puedes identificar en DevTools qué header falta cuando el backend no tiene CORS configurado
+- [ ] No hay inserción de HTML dinámico sin sanitización en el código del frontend
+
+</Checkpoint>
+
+## Completaste las 19 unidades del Track Frontend
+
+Cuando estés listo para ir más allá de lo que Rush usa hoy, continúa con los [extras del Track Frontend](/track-fe/extras/).

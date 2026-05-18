@@ -1,0 +1,198 @@
+---
+title: 'Tailwind: styling sin CSS-in-JS'
+description: 'Utility classes, responsive design, dark mode y las convenciones de Rush para Tailwind v4. Sin inline styles, sin CSS-in-JS.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/react-vite-setup']
+learning_outcomes:
+  - 'Usar utility classes de Tailwind v4 con diseño responsive'
+  - 'Manejar dark mode con la variante dark:'
+  - 'Aplicar las convenciones de Rush (sin inline styles, sin @apply excesivo)'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+  node: '24'
+lab_runnable: false
+sidebar:
+  order: 9
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### Por qué Tailwind en vez de CSS modules o CSS-in-JS
+
+CSS modules son buenos pero generan fricción cuando el equipo es pequeño y los componentes cambian rápido. CSS-in-JS (styled-components, Emotion) tiene costo en runtime y complica el server rendering.
+
+Tailwind resuelve el problema de naming (¿cómo llamo esta clase?) y mantiene los estilos colocalizados con el markup. El tradeoff es que el HTML se ve más denso — eso se controla extrayendo componentes.
+
+En Rush la decisión es pragmática: shadcn/ui ya usa Tailwind, entonces agregarlo no agrega fricción de tooling. La consistencia del stack pesa más que las preferencias individuales.
+
+### Utility classes básicas
+
+Tailwind tiene una clase para casi cualquier propiedad CSS:
+
+```html
+<!-- padding, margen, tipografía -->
+<div class="p-4 mt-2 text-sm font-medium text-gray-700">
+
+<!-- flex layout -->
+<div class="flex items-center gap-3 justify-between">
+
+<!-- grid -->
+<div class="grid grid-cols-3 gap-4">
+
+<!-- borders y shadows -->
+<div class="border border-gray-200 rounded-lg shadow-sm">
+```
+
+Fíjate que Tailwind v4 cambia la configuración: en vez de un archivo `tailwind.config.js`, la configuración va en el CSS usando directivas nativas:
+
+```css
+@import 'tailwindcss';
+
+@theme {
+  --color-brand: #2ecc71;
+  --color-brand-dark: #199850;
+}
+```
+
+### Responsive design
+
+Tailwind usa prefijos de breakpoint:
+
+```html
+<!-- mobile first: columna → fila en md (768px+) -->
+<div class="flex flex-col md:flex-row">
+  <aside class="w-full md:w-64">sidebar</aside>
+  <main class="flex-1">contenido</main>
+</div>
+```
+
+Rush usa los breakpoints por defecto de Tailwind (`sm`, `md`, `lg`, `xl`). No se definen breakpoints custom.
+
+### Dark mode
+
+Con `dark:` aplicas estilos cuando el usuario tiene dark mode activo:
+
+```html
+<div class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+```
+
+shadcn maneja dark mode con una clase `dark` en el `<html>`, no con `prefers-color-scheme`. Eso permite que el usuario pueda elegir el tema independientemente del sistema operativo.
+
+### Convenciones de Rush con Tailwind
+
+- Sin `style=""` inline para nada que Tailwind pueda hacer
+- Sin `@apply` en CSS a menos que sea un token reutilizable global (como `.btn-primary`)
+- Si una clase se repite en más de 3 lugares, extrae un componente, no uses `@apply`
+- No uses clases arbitrarias `[color:#123456]` — si necesitas un color específico, agrégalo como token en `@theme`
+
+## 2. Lab guiado
+
+<LabSpec title="Dashboard card con responsive y dark mode" estimatedMinutes={40} runnable={false}>
+
+Vas a crear un componente de card para el dashboard de ventas que funciona en mobile, tablet y dark mode.
+
+### Paso 1: instalar Tailwind v4 con Vite
+
+```bash
+pnpm add -D tailwindcss@4 @tailwindcss/vite
+```
+
+```ts
+// vite.config.ts
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+});
+```
+
+```css
+/* src/index.css */
+@import 'tailwindcss';
+```
+
+### Paso 2: componente MetricCard
+
+```tsx
+// src/components/MetricCard.tsx
+interface MetricCardProps {
+  label: string;
+  value: string;
+  delta?: string;
+  positive?: boolean;
+}
+
+export function MetricCard({ label, value, delta, positive }: MetricCardProps) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</p>
+      <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{value}</p>
+      {delta && (
+        <p
+          className={
+            positive
+              ? 'mt-1 text-sm text-green-600 dark:text-green-400'
+              : 'mt-1 text-sm text-red-600 dark:text-red-400'
+          }
+        >
+          {delta}
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+### Paso 3: layout responsive del dashboard
+
+```tsx
+// src/features/sales/components/SalesDashboard.tsx
+import { MetricCard } from '@/components/MetricCard';
+
+export function SalesDashboard() {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Resumen de ventas</h1>
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <MetricCard label="Ventas hoy" value="VES 12.450" delta="+8% vs ayer" positive />
+        <MetricCard label="Transacciones" value="47" delta="-2 vs ayer" positive={false} />
+        <MetricCard label="Ticket promedio" value="VES 265" />
+      </div>
+    </div>
+  );
+}
+```
+
+### Verificación final
+
+Abre el browser en `localhost:5173` y verifica:
+
+- En 375px de ancho: las cards se apilan verticalmente
+- En 640px+: 2 columnas
+- En 1024px+: 3 columnas
+- Activa dark mode con las DevTools (Rendering → prefers-color-scheme): el fondo debe cambiar a oscuro
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="tailwind-styling">
+
+1. ¿Cuándo es apropiado usar `@apply` en Rush y cuándo no?
+2. ¿Qué diferencia hay entre `md:flex-row` y `flex md:flex-row`?
+3. ¿Por qué shadcn usa una clase `dark` en el `<html>` en vez de `prefers-color-scheme`?
+
+- [ ] Las MetricCards se muestran en 1, 2 y 3 columnas en los breakpoints correctos
+- [ ] Dark mode funciona al activar `prefers-color-scheme: dark` en DevTools
+- [ ] No hay `style=""` inline en ningún componente del lab
+
+</Checkpoint>
+
+## Próxima unidad → [React Hook Form + Zod: formularios tipados](../react-hook-form-zod/)

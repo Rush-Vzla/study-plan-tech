@@ -1,0 +1,221 @@
+---
+title: 'React Router: navegación sin CVEs de supply chain'
+description: 'Por qué Rush eligió React Router sobre TanStack Router después del CVE 2026-05-14. Routes, loaders y outlets en la práctica.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 3
+prerequisites: ['track-fe/react-vite-setup']
+learning_outcomes:
+  - 'Entender el CVE 2026-05-14 que descartó TanStack Router para Rush'
+  - 'Configurar rutas anidadas con React Router v7'
+  - 'Usar loaders para cargar datos antes de renderizar una ruta'
+  - 'Proteger rutas con un guard de autenticación'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 2
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### CVE 2026-05-14: por qué TanStack Router quedó descartado
+
+El 14 de mayo de 2026 se publicó un CVE crítico en TanStack Router que permitía XSS a través de parámetros de búsqueda malformados al usar `useSearch()` sin sanitización. El vector era el parsing de URL params que el router hacía por defecto antes de que el componente los recibiera.
+
+Lo importante no es el CVE en sí — es la lección: Rush usa herramientas de routing que tienen historial de auditoría y masa crítica de adopción empresarial. React Router tiene más de 10 años en producción, tiene respaldo de Shopify (Remix) y su modelo de seguridad es más conservador. Eso no lo hace perfecto, pero lo hace más predecible para Rush en este momento.
+
+Fíjate que esto puede cambiar. Si TanStack Router publica un patch verificado y pasa un tiempo razonable sin nuevos issues de seguridad, Rush puede reconsiderar. Las decisiones de stack deben tener fechas de revisión.
+
+### Rutas en React Router v7
+
+React Router v7 usa el mismo modelo que Remix: rutas como archivos o como configuración declarativa. Rush usa configuración declarativa (más controlable en proyectos con auth guards).
+
+```text
+/ (layout raíz con navbar)
+├── /login         (pública)
+├── /app           (protegida — requiere auth)
+│   ├── /app/sales
+│   ├── /app/inventory
+│   └── /app/settings
+└── /*             (404)
+```
+
+### Loaders: datos antes de renderizar
+
+Un loader en React Router corre en el servidor (o en el cliente antes de que el componente se monte) y le pasa datos al componente a través de `useLoaderData()`. El beneficio es que la ruta no renderiza hasta que los datos están disponibles — sin estados de loading manual.
+
+```ts
+// src/features/sales/sales.loader.ts
+import type { LoaderFunctionArgs } from 'react-router';
+
+export async function salesLoader({ params }: LoaderFunctionArgs) {
+  const response = await fetch(`/api/sales?tenantId=${params.tenantId}`);
+  if (!response.ok) throw new Response('Not found', { status: 404 });
+  return response.json();
+}
+```
+
+### Outlet: composición de rutas anidadas
+
+`<Outlet />` es el punto de inserción donde React Router renderiza la ruta hija activa. Es cómo se hace el layout compartido (navbar, sidebar) sin duplicar código.
+
+```tsx
+// src/layouts/AppLayout.tsx
+import { Outlet } from 'react-router';
+
+export function AppLayout() {
+  return (
+    <div>
+      <nav>{/* navbar compartido */}</nav>
+      <main>
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+```
+
+## 2. Lab guiado
+
+<LabSpec title="Configurar rutas con guard de autenticación" estimatedMinutes={60} runnable={false}>
+
+Vas a configurar las rutas principales de Rush: una ruta pública de login y una ruta protegida que verifica auth antes de renderizar.
+
+### Setup
+
+```bash
+pnpm add react-router@7
+```
+
+### Paso 1: configurar el router en main.tsx
+
+```tsx
+// src/main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { createBrowserRouter, RouterProvider } from 'react-router';
+import { LoginPage } from '@/features/auth/LoginPage';
+import { AppLayout } from '@/layouts/AppLayout';
+import { SalesPage } from '@/features/sales/SalesPage';
+import { AuthGuard } from '@/features/auth/AuthGuard';
+
+const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <LoginPage />,
+  },
+  {
+    path: '/app',
+    element: (
+      <AuthGuard>
+        <AppLayout />
+      </AuthGuard>
+    ),
+    children: [
+      {
+        path: 'sales',
+        element: <SalesPage />,
+      },
+    ],
+  },
+  {
+    path: '*',
+    element: <div>404 — página no encontrada</div>,
+  },
+]);
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <RouterProvider router={router} />
+  </StrictMode>,
+);
+```
+
+### Paso 2: crear el AuthGuard
+
+```tsx
+// src/features/auth/AuthGuard.tsx
+import { Navigate } from 'react-router';
+import { useAuthStore } from '@/features/auth/auth.store';
+
+interface AuthGuardProps {
+  children: React.ReactNode;
+}
+
+export function AuthGuard({ children }: AuthGuardProps) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+}
+```
+
+### Paso 3: crear el AppLayout con Outlet
+
+```tsx
+// src/layouts/AppLayout.tsx
+import { Outlet, NavLink } from 'react-router';
+
+export function AppLayout() {
+  return (
+    <div className="flex h-screen">
+      <nav className="w-64 border-r p-4">
+        <NavLink to="/app/sales">Ventas</NavLink>
+      </nav>
+      <main className="flex-1 p-6">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+```
+
+### Paso 4: stub de las páginas
+
+```tsx
+// src/features/auth/LoginPage.tsx
+export function LoginPage() {
+  return <div>Login</div>;
+}
+
+// src/features/sales/SalesPage.tsx
+export function SalesPage() {
+  return <div>Ventas</div>;
+}
+```
+
+### Verificación final
+
+```bash
+pnpm dev
+```
+
+- Navega a `http://localhost:5173/app/sales` — debes ser redirigido a `/login` porque `isAuthenticated` es `false`.
+- Navega a `http://localhost:5173/login` — debe renderizar la LoginPage sin redirigir.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="react-router">
+
+1. ¿Por qué el CVE 2026-05-14 de TanStack Router es una razón válida para descartarlo, y cuándo debería revisarse esa decisión?
+2. ¿Qué hace `<Outlet />` y dónde va?
+3. ¿Cuál es la diferencia entre un loader de React Router y un `useEffect` con fetch?
+
+- [ ] Las rutas `/login` y `/app/*` están configuradas y funcionan
+- [ ] Navegar a `/app/sales` sin auth redirige a `/login`
+- [ ] El layout compartido renderiza en todas las rutas bajo `/app`
+
+</Checkpoint>
+
+## Próxima unidad → [Feature-first: carpetas que gritan el dominio](../feature-first/)

@@ -1,0 +1,210 @@
+---
+title: 'Playwright: E2E de flujos monetarios'
+description: 'Tests cross-browser de flujos críticos con Playwright. Por qué los E2E son obligatorios en Rush para cualquier flujo que involucre dinero.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 3
+prerequisites: ['modulo-0/testing-filosofia', 'track-fe/vitest-react']
+learning_outcomes:
+  - 'Configurar Playwright para tests E2E del frontend de Rush'
+  - 'Escribir un test E2E del flujo de registro de venta'
+  - 'Usar fixtures de Playwright para reutilizar el estado de autenticación'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+lab_runnable: false
+sidebar:
+  order: 17
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### Por qué E2E es obligatorio para flujos monetarios
+
+Los unit tests y los tests de integración verifican piezas. Los E2E verifican el flujo completo desde el browser hasta la base de datos.
+
+Fíjate en qué puede fallar que los unit tests no detectan:
+
+- El formulario de ventas valida en cliente pero el backend rechaza el request (CORS, validación diferente)
+- El token de autenticación no se envía correctamente con el request
+- La invalidación del cache después de crear una venta no funciona en el browser real
+- Un componente de Radix UI tiene un bug de accesibilidad en Firefox que no aparece en jsdom
+
+Para Rush, cualquier flujo que involucre dinero tiene un test E2E obligatorio. No es opcional.
+
+### Playwright vs Cypress
+
+Playwright tiene tres ventajas concretas sobre Cypress para Rush:
+
+1. Corre en Chromium, Firefox y WebKit (Safari) — Rush soporta los tres
+2. No tiene limitaciones con múltiples tabs o iframes — necesario para flujos de auth con redirects
+3. La API es async/await nativa — no hay que aprender el modelo de comandos encadenados de Cypress
+
+### Fixtures para reutilizar autenticación
+
+El paso más lento de los E2E es el login. Si cada test hace login desde cero, la suite tarda 10 veces más.
+
+Playwright tiene fixtures: puedes hacer login una vez, guardar el estado del browser en un archivo, y cargarlo en cada test. El test empieza ya autenticado.
+
+```ts
+// playwright/fixtures/auth.fixture.ts
+import { test as base } from '@playwright/test';
+
+export const test = base.extend({
+  authenticatedPage: async ({ page }, use) => {
+    await page.goto('/login');
+    await page.fill('[name=email]', 'dev@somosrush.io');
+    await page.fill('[name=password]', 'test-password');
+    await page.click('[type=submit]');
+    await page.waitForURL('/app/**');
+    await use(page);
+  },
+});
+```
+
+## 2. Lab guiado
+
+<LabSpec title="Test E2E del flujo de registro de venta" estimatedMinutes={60} runnable={false}>
+
+Vas a configurar Playwright y escribir el test del flujo crítico de registro de venta.
+
+### Setup
+
+```bash
+pnpm add -D @playwright/test@1
+npx playwright install chromium firefox
+```
+
+```ts
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,
+  use: {
+    baseURL: 'http://localhost:5173',
+    trace: 'on-first-retry',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
+  webServer: {
+    command: 'pnpm dev',
+    url: 'http://localhost:5173',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+### Paso 1: fixture de autenticación
+
+```ts
+// e2e/fixtures/auth.ts
+import { test as base } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+interface AuthFixtures {
+  authenticatedPage: Page;
+}
+
+export const test = base.extend<AuthFixtures>({
+  authenticatedPage: async ({ page }, use) => {
+    await page.goto('/login');
+    await page.getByLabel('Email').fill('dev@somosrush.io');
+    await page.getByLabel('Contraseña').fill('test-password');
+    await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+    await page.waitForURL('**/app/**');
+    await use(page);
+  },
+});
+
+export { expect } from '@playwright/test';
+```
+
+### Paso 2: test del flujo de registro de venta
+
+```ts
+// e2e/sales/create-sale.spec.ts
+import { test, expect } from '../fixtures/auth';
+
+test.describe('Registro de venta', () => {
+  test('el usuario puede registrar una venta en bolívares', async ({ authenticatedPage: page }) => {
+    await page.goto('/app/sales');
+
+    await expect(page.getByRole('heading', { name: 'Ventas' })).toBeVisible();
+
+    const amountInput = page.getByLabel('Monto');
+    await amountInput.fill('150.50');
+
+    const currencySelect = page.getByRole('combobox', { name: 'Moneda' });
+    await currencySelect.click();
+    await page.getByRole('option', { name: 'Bolívares (VES)' }).click();
+
+    await page.getByRole('button', { name: 'Registrar venta' }).click();
+
+    await expect(page.getByText('150.50')).toBeVisible({ timeout: 5000 });
+
+    await expect(amountInput).toHaveValue('');
+  });
+
+  test('el formulario no se envía con monto negativo', async ({ authenticatedPage: page }) => {
+    await page.goto('/app/sales');
+
+    await page.getByLabel('Monto').fill('-50');
+    await page.getByRole('button', { name: 'Registrar venta' }).click();
+
+    await expect(page.getByText(/mayor a 0/)).toBeVisible();
+
+    await expect(page.getByRole('heading', { name: 'Ventas' })).toBeVisible();
+  });
+});
+```
+
+### Paso 3: correr los tests
+
+```bash
+pnpm exec playwright test --headed
+```
+
+Con `--headed` el browser se abre y puedes ver el test ejecutarse. En CI, corre sin `--headed`.
+
+```bash
+pnpm exec playwright test --reporter=html
+npx playwright show-report
+```
+
+El reporte HTML muestra screenshots y videos de los tests que fallaron.
+
+### Verificación final
+
+```bash
+pnpm exec playwright test
+```
+
+Ambos tests deben pasar en los tres browsers (Chromium, Firefox, WebKit). Si alguno falla solo en Firefox o WebKit, tienes un bug cross-browser real.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="playwright-e2e">
+
+1. ¿Por qué Rush exige E2E para flujos monetarios y no confía solo en unit tests?
+2. ¿Qué hace el fixture `authenticatedPage` y por qué evita hacer login en cada test?
+3. ¿Qué diferencia hay entre `page.getByRole('button', ...)` y `page.locator('button')`?
+
+- [ ] Los dos tests E2E pasan en Chromium
+- [ ] El fixture de auth evita login manual en cada test
+- [ ] El test del monto negativo verifica que el formulario no se envió (la URL no cambia)
+
+</Checkpoint>
+
+## Próxima unidad → [Performance frontend sin obsesionarse](../performance-fe/)

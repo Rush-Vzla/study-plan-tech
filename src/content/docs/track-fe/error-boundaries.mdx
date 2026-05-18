@@ -1,0 +1,215 @@
+---
+title: 'Error Boundaries: la UI que no rompe todo'
+description: 'React Error Boundary, Suspense y fallback UI. Cómo Rush maneja errores en el cliente sin exponer información sensible al usuario.'
+unit_type: lectura-lab-checkpoint
+track: 'track-fe'
+estimated_hours: 2
+prerequisites: ['track-fe/tanstack-query-fundamentos']
+learning_outcomes:
+  - 'Crear un Error Boundary que captura errores de render'
+  - 'Combinar Error Boundary con Suspense para loading states'
+  - 'Reportar errores sin exponer datos internos en el UI'
+tags: ['obligatorio', 'track-fe']
+last_updated: '2026-05-18'
+stack_versions:
+  react: '19'
+lab_runnable: false
+sidebar:
+  order: 15
+---
+
+import LabSpec from '../../../components/LabSpec.astro';
+import Checkpoint from '../../../components/Checkpoint.astro';
+
+## 1. Conceptos
+
+### ¿Qué es un Error Boundary?
+
+Cuando un componente de React lanza una excepción durante el render, React desmonta todo el árbol y muestra una pantalla en blanco o el error de desarrollo. Eso es terrible para el usuario en producción.
+
+Un Error Boundary es un componente que captura las excepciones de sus hijos y muestra un fallback en vez de romper toda la aplicación.
+
+Fíjate en la limitación: los Error Boundaries solo capturan errores en el render, no en event handlers ni en código asíncrono. Para errores en `useEffect` o en fetch, TanStack Query tiene su propio manejo de error.
+
+### El ciclo completo en Rush
+
+```text
+Usuario abre /app/sales
+  ↓
+Suspense muestra "Cargando..." mientras TanStack Query fetcha
+  ↓
+Si el fetch falla → TanStack Query entra en estado error → componente muestra error de UI
+Si el render falla → Error Boundary captura → muestra fallback con botón "reintentar"
+```
+
+Los dos casos son distintos y se manejan distinto.
+
+### Qué mostrar en el fallback
+
+En producción, el fallback no debe mostrar:
+
+- Stack traces
+- Nombres de componentes internos
+- Valores de props que pueden contener datos del usuario
+
+Lo que sí debe mostrar:
+
+- Un mensaje amigable ("Ocurrió un error. El equipo fue notificado.")
+- Un botón para reintentar o volver al inicio
+- Si hay un ID de error correlacionado con el log del servidor, ese ID para que el usuario lo reporte
+
+### Reportar errores
+
+En producción, cuando un Error Boundary captura una excepción, debe reportarla a un servicio de monitoring (Sentry, Highlight, LogRocket). En Rush se usa un hook de reporting que envía el error al backend de forma anónima — sin datos del usuario en el payload.
+
+## 2. Lab guiado
+
+<LabSpec title="Error Boundary global y Suspense para las ventas" estimatedMinutes={40} runnable={false}>
+
+Vas a crear un Error Boundary reutilizable y un Suspense wrapper para el módulo de ventas.
+
+### Setup
+
+```bash
+pnpm add react-error-boundary@4
+```
+
+### Paso 1: componente de fallback
+
+```tsx
+// src/components/ErrorFallback.tsx
+import { Button } from '@/components/Button';
+
+interface ErrorFallbackProps {
+  error: Error;
+  resetErrorBoundary: () => void;
+}
+
+export function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps) {
+  const isNetworkError = error.message.includes('fetch') || error.message.includes('network');
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-4 rounded-lg border border-red-200 bg-red-50 p-8 text-center dark:border-red-800 dark:bg-red-950"
+    >
+      <h2 className="text-lg font-semibold text-red-900 dark:text-red-100">
+        {isNetworkError ? 'Error de conexión' : 'Ocurrió un error inesperado'}
+      </h2>
+      <p className="text-sm text-red-700 dark:text-red-300">
+        {isNetworkError
+          ? 'Revisa tu conexión a internet e intenta de nuevo.'
+          : 'El equipo fue notificado. Puedes intentar recargar la sección.'}
+      </p>
+      <Button variant="outline" onClick={resetErrorBoundary}>
+        Intentar de nuevo
+      </Button>
+    </div>
+  );
+}
+```
+
+### Paso 2: loading fallback para Suspense
+
+```tsx
+// src/components/LoadingSpinner.tsx
+export function LoadingSpinner() {
+  return (
+    <div className="flex h-32 items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-green-600" />
+    </div>
+  );
+}
+```
+
+### Paso 3: wrapper con Error Boundary y Suspense
+
+```tsx
+// src/components/SafeSection.tsx
+import { Suspense } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
+import { ErrorFallback } from './ErrorFallback';
+import { LoadingSpinner } from './LoadingSpinner';
+
+interface SafeSectionProps {
+  children: React.ReactNode;
+  onError?: (error: Error) => void;
+}
+
+export function SafeSection({ children, onError }: SafeSectionProps) {
+  return (
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onError={(error, info) => {
+        console.error('Error Boundary caught:', error, info);
+        onError?.(error);
+      }}
+    >
+      <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Paso 4: usar en la página de ventas
+
+```tsx
+// src/features/sales/components/SalesPage.tsx
+import { SafeSection } from '@/components/SafeSection';
+import { SalesContainer } from './SalesContainer';
+
+export function SalesPage() {
+  return (
+    <SafeSection>
+      <SalesContainer />
+    </SafeSection>
+  );
+}
+```
+
+### Paso 5: habilitar Suspense en TanStack Query
+
+Para que TanStack Query use Suspense:
+
+```ts
+// src/features/sales/hooks/useSales.ts
+import { useSuspenseQuery } from '@tanstack/react-query';
+
+export function useSales() {
+  const { businessId } = useTenant();
+
+  return useSuspenseQuery({
+    queryKey: ['tenant', businessId, 'sales'],
+    queryFn: () => fetchSales(businessId!),
+  });
+}
+```
+
+Con `useSuspenseQuery`, el componente no renderiza hasta que los datos estén disponibles — el Suspense muestra el spinner mientras tanto.
+
+### Verificación final
+
+Simula un error de red:
+
+1. En DevTools → Network → Offline
+2. Recarga la sección de ventas
+3. El spinner debe aparecer y luego el mensaje de "Error de conexión" con el botón "Intentar de nuevo"
+4. Al volver a online y hacer clic en el botón, la sección debe recuperarse
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="error-boundaries">
+
+1. ¿Por qué los Error Boundaries no capturan errores en event handlers?
+2. ¿Cuál es la diferencia entre `useQuery` y `useSuspenseQuery` en relación al Error Boundary?
+3. ¿Qué información NO debes mostrar en el fallback del Error Boundary en producción?
+
+- [ ] El Error Boundary captura errores de render y muestra el fallback sin romper el resto de la app
+- [ ] El fallback no muestra stack traces ni datos internos
+- [ ] Al hacer clic en "Intentar de nuevo", el Error Boundary se resetea y la sección intenta cargarse de nuevo
+
+</Checkpoint>
+
+## Próxima unidad → [Vitest + Testing Library para frontend](../vitest-react/)
