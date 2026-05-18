@@ -1,0 +1,334 @@
+---
+title: "Accesibilidad: no dejar a nadie afuera"
+description: ARIA roles, keyboard navigation y color contrast — cómo asegurar que Rush funcione para todos los usuarios, sin romper lo que shadcn/ui ya hace bien.
+sidebar:
+  order: 4
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-fe'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-fe]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-fe/shadcn-ui
+  - track-fe/tailwind-styling
+learning_outcomes:
+  - "Entender para qué sirven los ARIA roles y cuándo NO agregarlos"
+  - "Implementar navegación por teclado en componentes custom"
+  - "Verificar contraste de color con herramientas de browser y criterios WCAG AA"
+  - "Identificar qué hace shadcn/ui por accesibilidad y cómo no romperlo al personalizar"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  react: '19'
+  typescript: '6'
+lab_runnable: false
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Accesibilidad no es una feature que se agrega al final — es una consecuencia de usar HTML semántico correctamente y no romper lo que el browser y las librerías ya hacen bien. Esta unidad cubre los conceptos que te permiten auditar y mejorar la accesibilidad de componentes custom en Rush.
+
+## 1. Conceptos
+
+### 1. ARIA: cuándo ayuda y cuándo sobra
+
+ARIA (Accessible Rich Internet Applications) es un conjunto de atributos HTML que le dicen a los lectores de pantalla cómo interpretar elementos que no tienen semántica nativa. La regla más importante es esta: si el HTML semántico ya lo hace, no uses ARIA.
+
+Un botón `<button>` ya es accesible por defecto — es focuseable, tiene role `button`, responde a Enter y Space. Si usas `<div>` como botón, ahí sí necesitas ARIA. Pero la respuesta correcta es usar `<button>`, no ARIA sobre un `<div>`.
+
+Ejemplos de uso correcto:
+
+```tsx
+// Un botón de carga — el estado cambia pero el elemento no
+<button
+  aria-busy={isLoading}
+  aria-label={isLoading ? 'Guardando cambios...' : 'Guardar'}
+  disabled={isLoading}
+>
+  {isLoading ? 'Guardando...' : 'Guardar'}
+</button>
+```
+
+```tsx
+// Una sección que expande/colapsa
+<button
+  aria-expanded={isOpen}
+  aria-controls="details-panel"
+  onClick={() => setIsOpen((v) => !v)}
+>
+  Ver detalles
+</button>
+
+<div id="details-panel" hidden={!isOpen}>
+  Contenido expandible aquí
+</div>
+```
+
+```tsx
+// Un input con error
+<div>
+  <label htmlFor="amount-input">Monto</label>
+  <input
+    id="amount-input"
+    type="number"
+    aria-describedby={hasError ? 'amount-error' : undefined}
+    aria-invalid={hasError}
+    value={amount}
+    onChange={(e) => setAmount(e.target.value)}
+  />
+  {hasError && (
+    <span id="amount-error" role="alert">
+      El monto debe ser mayor a cero.
+    </span>
+  )}
+</div>
+```
+
+Fíjate en el último ejemplo: `role="alert"` hace que el lector de pantalla anuncie el error automáticamente cuando aparece en el DOM, sin que el usuario tenga que navegar hasta él. Eso es útil para errores de validación en formularios de ventas.
+
+Lo que no debes hacer es agregar ARIA cuando el HTML ya lo hace. Un problema común es cuando los devs agregan atributos encima de elementos que ya son semánticos — eso no mejora la accesibilidad, la complica. Si algo tiene semántica nativa en HTML, úsala.
+
+### 2. Keyboard navigation: el tab key como segundo usuario
+
+Cualquier usuario que no use mouse (personas con motor disabilities, usuarios avanzados, personas con condiciones temporales) navega con el teclado. En Rush, esto importa especialmente en formularios de ventas y flujos críticos.
+
+Las reglas básicas:
+
+**Tab order**: el orden en que el foco se mueve con Tab debe seguir el orden visual. Evita `tabIndex` positivos (valores mayores a 0) — solo añaden confusión. Usa `tabIndex={0}` para hacer un elemento no-interactivo focuseable, y `tabIndex={-1}` para sacarlo del tab order pero mantenerlo focuseable por JS.
+
+**Focus trap en modales**: cuando un modal está abierto, el foco no debe escapar al contenido de atrás. shadcn/ui maneja esto con Radix UI — si usas `<Dialog>` de shadcn, el focus trap ya está implementado. No lo reimplementes.
+
+**Focus visible**: el outline del foco no debe estar suprimido. Tailwind resetea el outline con `outline-none` en algunos componentes — siempre comprueba que el focus sea visible.
+
+```tsx
+// MAL: esto elimina el indicador de foco
+<button className="outline-none focus:outline-none">Guardar</button>
+
+// BIEN: usa el outline de Tailwind de forma visible
+<button className="focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none">
+  Guardar
+</button>
+```
+
+**Escape key**: los modales, dropdowns y overlays deben cerrarse con Escape. De nuevo, shadcn/ui ya lo hace — no rompas eso al personalizar.
+
+**Enter y Space en elementos interactivos**: un botón real responde a Enter y Space. Si construyes un componente que actúa como botón pero usa otro elemento HTML, tienes que implementar esos handlers manualmente. La solución más simple es usar `<button>`.
+
+### 3. Color contrast: que el texto se pueda leer
+
+El estándar WCAG AA requiere una relación de contraste de al menos 4.5:1 para texto normal y 3:1 para texto grande (18px o 14px bold).
+
+En la paleta Rush, el verde de acento (`#2ecc71`) sobre fondo blanco o sobre fondo oscuro puede fallar el contraste mínimo si no se ajusta bien. Las herramientas para verificarlo:
+
+- **Chrome DevTools**: panel Accessibility muestra el contraste de cualquier elemento seleccionado.
+- **axe DevTools** (extensión de browser): escanea toda la página y reporta violaciones WCAG.
+- **Lighthouse**: el audit de Accessibility puntúa el contraste automáticamente.
+
+Para verificar un color específico puedes usar el color picker en DevTools — tiene un indicador de contraste incorporado.
+
+En Tailwind, la clase `text-gray-500` sobre fondo blanco puede tener contraste insuficiente dependiendo del background. Si usas colores custom en `custom.css`, verifica el contraste con una de estas herramientas antes de hacer merge.
+
+### 4. Qué hace shadcn/ui y cómo no romperlo
+
+shadcn/ui está construido sobre Radix UI, que implementa los patrones de accesibilidad de WAI-ARIA (el estándar de W3C para componentes ricos). Cuando usas `<Dialog>`, `<Select>`, `<Checkbox>`, `<Tabs>` de shadcn, estás obteniendo:
+
+- Focus management automático.
+- ARIA attributes correctos.
+- Keyboard navigation según el patrón WAI-ARIA correspondiente.
+- Anuncios de state change para lectores de pantalla.
+
+Las formas más comunes de romper eso al personalizar:
+
+1. **Reemplazar el elemento raíz**: si cambias `<button>` por `<div>` en el trigger de un dropdown, pierdes el keyboard handling que Radix añade al `<button>`.
+2. **Suprimir el outline sin reemplazarlo**: `focus:outline-none` sin `focus-visible:ring-*` hace que el focus sea invisible.
+3. **Condicionalmente renderizar con `display:none` en vez de `hidden`**: Radix maneja visibilidad con `hidden` (que remueve del tab order). Si usas `display:none` via clases Tailwind de forma distinta, puedes interferir.
+4. **Añadir ARIA que contradice el de Radix**: si Radix ya pone `aria-expanded` en un trigger, no lo pongas tú también — dos fuentes de verdad para el mismo atributo crean comportamiento indefinido.
+
+La regla práctica: si estás personalizando un componente de shadcn, personaliza solo el estilo (clases Tailwind). No toques la estructura HTML, los atributos ARIA, ni los event handlers de Radix.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Auditar y corregir accesibilidad en un componente de Rush"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a auditar la accesibilidad de un componente de formulario típico de Rush, identificar los problemas, y corregirlos sin romper el comportamiento existente.
+
+**Paso 1**: Crea este componente con problemas de accesibilidad deliberados.
+
+```tsx
+// src/features/sales/components/SaleFormBad.tsx
+// NOTA: Este componente tiene problemas de accesibilidad intencionales para el lab
+export function SaleFormBad() {
+  const [amount, setAmount] = React.useState('');
+  const [currency, setCurrency] = React.useState('USD');
+  const [hasError, setHasError] = React.useState(false);
+
+  const handleSubmit = () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setHasError(true);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ color: '#aaaaaa', fontSize: '14px' }}>Monto de la venta</div>
+      <input
+        type="number"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        style={{ border: '1px solid #ccc', padding: '8px' }}
+      />
+
+      {hasError && (
+        <div style={{ color: 'red', fontSize: '12px' }}>El monto debe ser mayor a cero</div>
+      )}
+
+      <div style={{ color: '#aaaaaa', fontSize: '14px' }}>Moneda</div>
+      <div
+        onClick={() => setCurrency('USD')}
+        style={{ cursor: 'pointer', background: currency === 'USD' ? '#eee' : 'white' }}
+      >
+        USD
+      </div>
+      <div
+        onClick={() => setCurrency('VES')}
+        style={{ cursor: 'pointer', background: currency === 'VES' ? '#eee' : 'white' }}
+      >
+        VES
+      </div>
+
+      <div
+        onClick={handleSubmit}
+        style={{ background: '#2ecc71', color: 'white', padding: '8px 16px', cursor: 'pointer' }}
+      >
+        Guardar venta
+      </div>
+    </div>
+  );
+}
+```
+
+**Paso 2**: Usa Chrome DevTools para identificar los problemas. Abre el panel Accessibility y analiza cada elemento. Deberías encontrar al menos 5 problemas distintos.
+
+Los problemas que debes encontrar:
+
+- El texto de label tiene contraste insuficiente (`#aaaaaa` sobre blanco).
+- El input no tiene un `<label>` asociado.
+- El error no tiene `role="alert"` ni está asociado al input con `aria-describedby`.
+- Los dos selectores de moneda son `<div>`, no elementos interactivos accesibles.
+- El botón de guardar es un `<div>` sin role, sin keyboard handling.
+
+**Paso 3**: Corrige el componente.
+
+```tsx
+// src/features/sales/components/SaleFormGood.tsx
+import React from 'react';
+
+export function SaleFormGood() {
+  const [amount, setAmount] = React.useState('');
+  const [currency, setCurrency] = React.useState<'USD' | 'VES'>('USD');
+  const [hasError, setHasError] = React.useState(false);
+
+  const handleSubmit = () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setHasError(true);
+      return;
+    }
+    setHasError(false);
+    console.info('Sale submitted:', { amount, currency });
+  };
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} noValidate>
+      <div>
+        <label htmlFor="sale-amount" className="text-gray-700 text-sm font-medium">
+          Monto de la venta
+        </label>
+        <input
+          id="sale-amount"
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          aria-describedby={hasError ? 'sale-amount-error' : undefined}
+          aria-invalid={hasError}
+          className="border border-gray-300 rounded px-3 py-2 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
+        />
+        {hasError && (
+          <span id="sale-amount-error" role="alert" className="text-red-600 text-sm">
+            El monto debe ser mayor a cero.
+          </span>
+        )}
+      </div>
+
+      <fieldset>
+        <legend className="text-gray-700 text-sm font-medium">Moneda</legend>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name="currency"
+            value="USD"
+            checked={currency === 'USD'}
+            onChange={() => setCurrency('USD')}
+          />
+          USD
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name="currency"
+            value="VES"
+            checked={currency === 'VES'}
+            onChange={() => setCurrency('VES')}
+          />
+          VES
+        </label>
+      </fieldset>
+
+      <button
+        type="submit"
+        className="bg-green-500 text-white px-4 py-2 rounded focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:outline-none"
+      >
+        Guardar venta
+      </button>
+    </form>
+  );
+}
+```
+
+**Paso 4**: Instala la extensión axe DevTools en Chrome y corre el audit sobre ambas versiones del componente. Compara los reportes.
+
+**Verificación**:
+
+- `SaleFormBad` debería tener al menos 4 violations en axe.
+- `SaleFormGood` debería tener 0 violations.
+- Navega `SaleFormGood` solo con Tab y Enter — todo debe funcionar sin mouse.
+- Verifica en Chrome DevTools que el contraste del botón (`#22c55e` sobre blanco) cumple WCAG AA.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="accesibilidad-a11y">
+
+1. ¿Cuál es la diferencia entre `aria-label` y `aria-labelledby`? ¿Cuándo usarías cada uno? Da un ejemplo concreto de un componente de Rush donde aplica.
+2. ¿Por qué shadcn/ui usa Radix UI como base? ¿Qué te da Radix que no tendrías si construyeras los componentes desde cero con React puro?
+3. Un dev del equipo quiere cambiar el `<button>` del trigger de un `<DropdownMenu>` de shadcn por un `<div>` porque necesita un estilo específico. ¿Qué le explicarías y cuál sería la alternativa correcta?
+
+- [ ] Audité un componente con problemas de accesibilidad usando Chrome DevTools o axe, identifiqué al menos 4 issues, y los corregí en la versión mejorada.
+- [ ] Puedo navegar `SaleFormGood` completamente con el teclado (Tab, Enter, Space, flechas para radios) sin tocar el mouse.
+- [ ] Entiendo qué partes de accesibilidad maneja Radix UI automáticamente y cuáles son mi responsabilidad al personalizar shadcn/ui.
+
+</Checkpoint>
+
+## Esto fue lo más importante
+
+Accesibilidad en Rush no requiere un esfuerzo extra heroico si usas HTML semántico y no rompes lo que shadcn/ui ya implementa. El 80% de los problemas vienen de usar `<div>` donde debería haber `<button>`, `<label>`, o `<input>`. Si eso lo tienes claro, el resto es refinamiento.
+
+Si algo no quedó claro, relée la sección sobre qué hace shadcn/ui antes de personalizar — es el punto más frecuente donde se introduce regresión de accesibilidad sin darse cuenta.

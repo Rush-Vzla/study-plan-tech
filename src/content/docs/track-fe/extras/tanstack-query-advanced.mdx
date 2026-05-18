@@ -1,0 +1,376 @@
+---
+title: "TanStack Query avanzado: optimistic updates y offline"
+description: Optimistic updates, placeholderData y offline strategies — los patrones de TanStack Query que hacen que la UI se sienta instantánea incluso cuando la red es lenta o no está.
+sidebar:
+  order: 2
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-fe'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-fe]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-fe/tanstack-query-fundamentos
+  - track-fe/tanstack-query-tenant-aware
+learning_outcomes:
+  - "Implementar optimistic updates con rollback automático cuando el servidor falla"
+  - "Usar placeholderData para mostrar contenido relevante mientras llega la data real"
+  - "Configurar comportamiento offline con networkMode y persistQueryClient"
+  - "Decidir cuándo optimistic updates agrega valor real vs cuándo complica sin necesidad"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  react: '19'
+  typescript: '6'
+lab_runnable: false
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+TanStack Query resuelve el 80% de los casos con `useQuery` + `useMutation` + `invalidateQueries`. Esta unidad cubre el 20% restante — los escenarios donde la red es un factor real: actualizaciones optimistas, placeholders para navegación rápida, y apps que necesitan funcionar sin conexión.
+
+## 1. Conceptos
+
+### 1. Optimistic updates: actuar antes de confirmar
+
+Una actualización optimista es simple: primero actualizas la UI como si el servidor ya aceptó el cambio, y si el servidor falla, revertes. El usuario siente que la app responde instantáneamente.
+
+El patrón con `useMutation`:
+
+```tsx
+// src/features/sales/hooks/useUpdateSaleStatus.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Sale } from '@/types/sale';
+
+interface UpdateStatusPayload {
+  saleId: string;
+  status: 'pending' | 'completed' | 'cancelled';
+}
+
+export function useUpdateSaleStatus(tenantId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ saleId, status }: UpdateStatusPayload) =>
+      fetch(`/api/sales/${saleId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }).then((res) => {
+        if (!res.ok) throw new Error('Failed to update status');
+        return res.json();
+      }),
+
+    onMutate: async ({ saleId, status }) => {
+      // 1. Cancela queries en vuelo para que no sobreescriban el optimistic update
+      await queryClient.cancelQueries({ queryKey: ['tenant', tenantId, 'sales'] });
+
+      // 2. Guarda el estado anterior para poder revertir
+      const previousSales = queryClient.getQueryData<Sale[]>(['tenant', tenantId, 'sales']);
+
+      // 3. Aplica el cambio optimísticamente
+      queryClient.setQueryData<Sale[]>(['tenant', tenantId, 'sales'], (old) =>
+        old?.map((sale) => (sale.id === saleId ? { ...sale, status } : sale)) ?? [],
+      );
+
+      // 4. Retorna el contexto de rollback
+      return { previousSales };
+    },
+
+    onError: (_err, _variables, context) => {
+      // Si el servidor falló, revertimos al estado anterior
+      if (context?.previousSales) {
+        queryClient.setQueryData(['tenant', tenantId, 'sales'], context.previousSales);
+      }
+    },
+
+    onSettled: () => {
+      // Siempre refrescamos desde el servidor al final (éxito o error)
+      queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'sales'] });
+    },
+  });
+}
+```
+
+Lo que pasa es que `onMutate` corre antes de que el request HTTP llegue al servidor. Si el servidor responde con error, `onError` revierte usando el `context` que `onMutate` retornó. Si el servidor responde OK, `onSettled` refuerza la consistencia trayendo el estado definitivo.
+
+¿Cuándo tiene sentido? Cuando el usuario dispara una acción que espera ver reflejada de inmediato — marcar una tarea como hecha, cambiar el estado de una venta, actualizar una nota. Si la operación falla raramente y el costo de un rollback es bajo, los optimistic updates mejoran la UX de forma notable.
+
+¿Cuándo NO usarlos? Cuando la operación tiene efectos secundarios complejos en el servidor que no puedes replicar en el cliente — cálculos con lógica de negocio no trivial, operaciones que involucran IDs generados por el servidor, o transacciones donde el rollback confundiría más de lo que ayuda.
+
+### 2. placeholderData: navegación que se siente instantánea
+
+`placeholderData` te permite mostrar data mientras llega la real. A diferencia de `initialData`, no se persiste en el cache — es solo visual.
+
+El caso más útil es la paginación: mientras carga la página 2, muestras los datos de la página 1 con opacidad reducida:
+
+```tsx
+// src/features/sales/hooks/useSalesPaginated.ts
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
+
+export function useSalesPaginated(tenantId: string, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: ['tenant', tenantId, 'sales', 'paginated', page, pageSize],
+    queryFn: () =>
+      fetch(`/api/sales?page=${page}&pageSize=${pageSize}`).then((res) => res.json()),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+```
+
+Uso en el componente:
+
+```tsx
+function SalesList({ tenantId }: { tenantId: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data, isFetching, isPlaceholderData } = useSalesPaginated(tenantId, page, 10);
+
+  return (
+    <div>
+      <ul style={{ opacity: isPlaceholderData ? 0.5 : 1 }}>
+        {data?.items.map((sale) => (
+          <li key={sale.id}>{sale.id}</li>
+        ))}
+      </ul>
+      {isFetching && <span>Cargando...</span>}
+      <button onClick={() => setPage((p) => p - 1)} disabled={page === 1}>
+        Anterior
+      </button>
+      <button
+        onClick={() => setPage((p) => p + 1)}
+        disabled={isPlaceholderData || !data?.hasNextPage}
+      >
+        Siguiente
+      </button>
+    </div>
+  );
+}
+```
+
+`isPlaceholderData` es `true` cuando lo que ves en pantalla es la data de la query anterior, no la que pediste. Eso te permite deshabilitar el botón "Siguiente" para que el usuario no avance antes de que llegue la página actual.
+
+### 3. Offline strategies: qué hace la app sin red
+
+TanStack Query tiene `networkMode` con tres valores:
+
+- `'online'` (default): las queries se suspenden cuando no hay red y se reanudan solas cuando vuelve.
+- `'always'`: las queries corren siempre, red o no. Útil cuando tienes un service worker que intercepta los requests.
+- `'offlineFirst'`: corre la query aunque no haya red — si el cache tiene data, la retorna; si no, falla normalmente.
+
+Para la mayoría de los casos de Rush, `'online'` es suficiente. El caso donde `'offlineFirst'` o `'always'` tienen sentido es cuando instalas un service worker con caché de requests:
+
+```tsx
+// En el QueryClient global
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      networkMode: 'offlineFirst',
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
+    },
+  },
+});
+```
+
+Para persistir el cache entre sesiones (que la app cargue con data aunque no haya red), puedes usar `persistQueryClient` con `localStorage` como storage:
+
+```tsx
+// src/lib/queryClient.ts
+import { QueryClient } from '@tanstack/react-query';
+import { persistQueryClient } from '@tanstack/react-query-persist-client';
+import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      gcTime: 1000 * 60 * 60 * 24, // 24 horas en cache
+      networkMode: 'offlineFirst',
+    },
+  },
+});
+
+const persister = createSyncStoragePersister({
+  storage: window.localStorage,
+  key: 'rush-query-cache',
+});
+
+persistQueryClient({
+  queryClient,
+  persister,
+  maxAge: 1000 * 60 * 60 * 24, // 24 horas
+});
+```
+
+Acá está el punto: localStorage tiene límite de ~5MB. Si tu cache crece mucho, puedes usar IndexedDB a través de `createAsyncStoragePersister`. Rush no usa persistencia de cache todavía — esto es para cuando tengas flujos offline reales.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Optimistic update en un toggle de estado de venta"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab implementarás un toggle para cambiar el estado de una venta con optimistic update y rollback automático. Simularás un servidor que falla aleatoriamente para probar el rollback.
+
+**Paso 1**: Define los tipos y el mock del servidor.
+
+```ts
+// src/features/sales/types.ts
+export type SaleStatus = 'pending' | 'completed' | 'cancelled';
+
+export interface Sale {
+  id: string;
+  amount: number;
+  currency: 'USD' | 'VES';
+  status: SaleStatus;
+  createdAt: string;
+}
+```
+
+```ts
+// src/features/sales/api/salesApi.ts
+import type { Sale, SaleStatus } from '../types';
+
+const mockSales: Sale[] = Array.from({ length: 5 }, (_, i) => ({
+  id: `sale-${i + 1}`,
+  amount: (i + 1) * 100,
+  currency: 'USD',
+  status: 'pending',
+  createdAt: new Date().toISOString(),
+}));
+
+export async function fetchSales(): Promise<Sale[]> {
+  await new Promise((r) => setTimeout(r, 300));
+  return [...mockSales];
+}
+
+export async function updateSaleStatus(saleId: string, status: SaleStatus): Promise<Sale> {
+  await new Promise((r) => setTimeout(r, 500));
+
+  // Simula un fallo aleatorio del 30% del tiempo
+  if (Math.random() < 0.3) {
+    throw new Error('Server error: status update failed');
+  }
+
+  const sale = mockSales.find((s) => s.id === saleId);
+  if (!sale) throw new Error('Sale not found');
+
+  sale.status = status;
+  return { ...sale };
+}
+```
+
+**Paso 2**: Crea el hook con optimistic update.
+
+```tsx
+// src/features/sales/hooks/useToggleSaleStatus.ts
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { updateSaleStatus } from '../api/salesApi';
+import type { Sale, SaleStatus } from '../types';
+
+export function useToggleSaleStatus(tenantId: string) {
+  const queryClient = useQueryClient();
+  const queryKey = ['tenant', tenantId, 'sales'];
+
+  return useMutation({
+    mutationFn: ({ saleId, status }: { saleId: string; status: SaleStatus }) =>
+      updateSaleStatus(saleId, status),
+
+    onMutate: async ({ saleId, status }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previousSales = queryClient.getQueryData<Sale[]>(queryKey);
+
+      queryClient.setQueryData<Sale[]>(queryKey, (old) =>
+        old?.map((s) => (s.id === saleId ? { ...s, status } : s)) ?? [],
+      );
+
+      return { previousSales };
+    },
+
+    onError: (_err, _vars, context) => {
+      if (context?.previousSales) {
+        queryClient.setQueryData(queryKey, context.previousSales);
+      }
+    },
+
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
+  });
+}
+```
+
+**Paso 3**: Crea el componente que usa el hook.
+
+```tsx
+// src/features/sales/components/SalesList.tsx
+import { useQuery } from '@tanstack/react-query';
+import { fetchSales } from '../api/salesApi';
+import { useToggleSaleStatus } from '../hooks/useToggleSaleStatus';
+import type { SaleStatus } from '../types';
+
+const TENANT_ID = 'tenant-demo';
+const NEXT_STATUS: Record<SaleStatus, SaleStatus> = {
+  pending: 'completed',
+  completed: 'cancelled',
+  cancelled: 'pending',
+};
+
+export function SalesList() {
+  const { data: sales, isLoading } = useQuery({
+    queryKey: ['tenant', TENANT_ID, 'sales'],
+    queryFn: fetchSales,
+  });
+
+  const { mutate: toggleStatus, isPending } = useToggleSaleStatus(TENANT_ID);
+
+  if (isLoading) return <p>Cargando ventas...</p>;
+
+  return (
+    <ul>
+      {sales?.map((sale) => (
+        <li key={sale.id} className="flex gap-4 items-center py-2">
+          <span>{sale.id}</span>
+          <span>${sale.amount} {sale.currency}</span>
+          <span className="font-mono text-sm">{sale.status}</span>
+          <button
+            onClick={() => toggleStatus({ saleId: sale.id, status: NEXT_STATUS[sale.status] })}
+            disabled={isPending}
+          >
+            Cambiar estado
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**Verificación**: abre el componente, haz clic en "Cambiar estado" varias veces rápido y observa:
+
+- El estado cambia de inmediato en la UI (optimistic).
+- Si el mock falla (30% de probabilidad), el estado vuelve al anterior automáticamente (rollback).
+- El log de red muestra que el request al servidor ocurre después del cambio visual.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="tanstack-query-advanced">
+
+1. ¿Por qué es necesario llamar `cancelQueries` antes de aplicar un optimistic update? ¿Qué pasaría si no lo hicieras y una query en vuelo responde después del update?
+2. ¿Cuál es la diferencia entre `placeholderData` e `initialData` en TanStack Query? ¿Cuándo usarías cada uno?
+3. Si una app necesita funcionar offline con datos cacheados de la sesión anterior, ¿qué combinación de `networkMode` y persistencia usarías? ¿Qué limitaciones tiene `localStorage` como storage?
+
+- [ ] Implementé un optimistic update con rollback automático usando `onMutate`, `onError` y `onSettled`, y verifiqué que el rollback funciona cuando el servidor retorna error.
+- [ ] Puedo explicar el ciclo completo: `cancelQueries` → update local → request al servidor → éxito o rollback → `invalidateQueries`.
+- [ ] Entiendo cuándo los optimistic updates agregan valor (baja frecuencia de error, efecto inmediato esperado) vs cuándo complican sin necesidad (lógica de servidor compleja, IDs generados remotamente).
+
+</Checkpoint>
+
+## Próxima unidad → [Micro-frontends: cuándo tiene sentido](../micro-frontends-intro/)

@@ -1,0 +1,455 @@
+---
+title: "Patrones avanzados de React"
+description: Compound components, render props y context composition — los patrones que usan las librerías que Rush consume y que te ayudan a diseñar APIs de componentes más flexibles.
+sidebar:
+  order: 1
+  badge:
+    text: 'extra'
+    variant: caution
+track: 'track-fe'
+unit_type: lectura-lab-checkpoint
+tags: [extra, track-fe]
+estimated_hours: 3
+extra: true
+prerequisites:
+  - track-fe/react-vite-setup
+  - track-fe/container-presentational
+  - track-fe/feature-first
+learning_outcomes:
+  - "Implementar el patrón compound component para APIs de componentes con estado compartido implícito"
+  - "Usar render props para inyectar lógica de renderizado sin crear acoplamiento"
+  - "Componer múltiples contextos sin generar provider nesting inmanejable"
+  - "Identificar cuándo cada patrón agrega valor vs cuándo complica sin necesidad"
+last_updated: '2026-05-18'
+stack_versions:
+  node: '24'
+  react: '19'
+  typescript: '6'
+lab_runnable: false
+---
+
+import LabSpec from '../../../../components/LabSpec.astro';
+import Checkpoint from '../../../../components/Checkpoint.astro';
+
+Estos patrones los verás en shadcn/ui, Radix UI, y cualquier librería de componentes seria. No los usas todos los días en Rush, pero entenderlos te hace mejor consumidor de esas librerías y mejor diseñador cuando necesitas construir componentes reutilizables.
+
+## 1. Conceptos
+
+### 1. Compound components: cuando el estado es compartido implícitamente
+
+Fíjate en cómo usas un `<Select>` de shadcn/ui:
+
+```tsx
+<Select>
+  <SelectTrigger>
+    <SelectValue placeholder="Elige una opción" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="one">Uno</SelectItem>
+    <SelectItem value="two">Dos</SelectItem>
+  </SelectContent>
+</Select>
+```
+
+¿Cómo sabe `SelectItem` cuál es el valor actualmente seleccionado? No se lo pasas como prop directamente. Hay estado compartido entre `Select`, `SelectTrigger` y `SelectItem` que fluye implícitamente — eso es un compound component.
+
+El mecanismo es Context + un componente padre que centraliza el estado:
+
+```tsx
+// Paso 1: define el contexto y el tipo de estado
+interface TabsContextValue {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
+
+function useTabsContext() {
+  const ctx = React.useContext(TabsContext);
+  if (!ctx) throw new Error('useTabsContext must be used inside <Tabs>');
+  return ctx;
+}
+
+// Paso 2: el componente padre centraliza el estado
+function Tabs({ children, defaultTab }: { children: React.ReactNode; defaultTab: string }) {
+  const [activeTab, setActiveTab] = React.useState(defaultTab);
+  return (
+    <TabsContext.Provider value={{ activeTab, setActiveTab }}>
+      <div className="tabs">{children}</div>
+    </TabsContext.Provider>
+  );
+}
+
+// Paso 3: los hijos consumen el contexto sin props explícitas
+function TabTrigger({ value, children }: { value: string; children: React.ReactNode }) {
+  const { activeTab, setActiveTab } = useTabsContext();
+  return (
+    <button
+      className={activeTab === value ? 'active' : ''}
+      onClick={() => setActiveTab(value)}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabPanel({ value, children }: { value: string; children: React.ReactNode }) {
+  const { activeTab } = useTabsContext();
+  if (activeTab !== value) return null;
+  return <div className="tab-panel">{children}</div>;
+}
+
+// Exporta todo como namespace del componente padre
+Tabs.Trigger = TabTrigger;
+Tabs.Panel = TabPanel;
+```
+
+Uso:
+
+```tsx
+<Tabs defaultTab="ventas">
+  <Tabs.Trigger value="ventas">Ventas</Tabs.Trigger>
+  <Tabs.Trigger value="costos">Costos</Tabs.Trigger>
+  <Tabs.Panel value="ventas">Contenido de ventas aquí</Tabs.Panel>
+  <Tabs.Panel value="costos">Contenido de costos aquí</Tabs.Panel>
+</Tabs>
+```
+
+La ventaja es que el usuario del componente no necesita gestionar el estado activo — solo describe la estructura. La desventaja: el estado queda oculto, lo que puede complicar el debugging si el componente crece mucho.
+
+### 2. Render props: inyectar lógica de renderizado
+
+El patrón render props resuelve un problema diferente: tienes lógica (fetching, cálculos, estado) que quieres reutilizar pero cuya presentación puede variar.
+
+Imagínate que tienes un componente que maneja la lógica de paginación — calcular páginas, manejar el estado actual, los handlers — pero la UI de los controles puede ser distinta según el contexto:
+
+```tsx
+interface PaginationState {
+  currentPage: number;
+  totalPages: number;
+  goToPage: (page: number) => void;
+  goNext: () => void;
+  goPrev: () => void;
+  canGoNext: boolean;
+  canGoPrev: boolean;
+}
+
+interface PaginationProps {
+  totalItems: number;
+  pageSize: number;
+  children: (state: PaginationState) => React.ReactNode;
+}
+
+function Pagination({ totalItems, pageSize, children }: PaginationProps) {
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  const state: PaginationState = {
+    currentPage,
+    totalPages,
+    goToPage: setCurrentPage,
+    goNext: () => setCurrentPage((p) => Math.min(p + 1, totalPages)),
+    goPrev: () => setCurrentPage((p) => Math.max(p - 1, 1)),
+    canGoNext: currentPage < totalPages,
+    canGoPrev: currentPage > 1,
+  };
+
+  return <>{children(state)}</>;
+}
+```
+
+Uso — la presentación es completamente libre:
+
+```tsx
+<Pagination totalItems={200} pageSize={10}>
+  {({ currentPage, totalPages, goNext, goPrev, canGoNext, canGoPrev }) => (
+    <div className="flex gap-2">
+      <button onClick={goPrev} disabled={!canGoPrev}>Anterior</button>
+      <span>{currentPage} / {totalPages}</span>
+      <button onClick={goNext} disabled={!canGoNext}>Siguiente</button>
+    </div>
+  )}
+</Pagination>
+```
+
+Acá está el punto: con TanStack Query ya tienes data fetching manejado por los hooks, así que render props aparece más en casos de UI stateful — scroll position, form wizards multi-step, o selectores complejos.
+
+### 3. Context composition: múltiples contextos sin nesting caótico
+
+Cuando tienes varios contextos en la app — auth, tenant, theme, locale — el árbol de providers se puede complicar:
+
+```tsx
+// Esto se vuelve inmanejable rápido
+<AuthProvider>
+  <TenantProvider>
+    <ThemeProvider>
+      <LocaleProvider>
+        <App />
+      </LocaleProvider>
+    </ThemeProvider>
+  </TenantProvider>
+</AuthProvider>
+```
+
+La solución es componer los providers en un componente único:
+
+```tsx
+// src/providers/AppProviders.tsx
+interface AppProvidersProps {
+  children: React.ReactNode;
+}
+
+const providers = [AuthProvider, TenantProvider, ThemeProvider, LocaleProvider] as const;
+
+export function AppProviders({ children }: AppProvidersProps) {
+  return providers.reduceRight<React.ReactNode>(
+    (child, Provider) => <Provider>{child}</Provider>,
+    children,
+  );
+}
+```
+
+Uso en `main.tsx`:
+
+```tsx
+<AppProviders>
+  <RouterProvider router={router} />
+</AppProviders>
+```
+
+El orden importa: los providers de arriba en el array son los más externos. `AuthProvider` primero significa que `TenantProvider` puede consumir el contexto de auth si lo necesita.
+
+## 2. Lab guiado
+
+<LabSpec
+  title="Tabs compound component y Pagination con render props"
+  estimatedMinutes={60}
+  runnable={false}
+>
+
+En este lab vas a implementar un componente `Tabs` con el patrón compound component y un componente `Pagination` con render props. Ambos van a estar tipados con TypeScript strict.
+
+**Paso 1**: Crea la estructura de archivos.
+
+```text
+src/
+  components/
+    ui/
+      tabs/
+        Tabs.tsx
+        Tabs.test.tsx
+      pagination/
+        Pagination.tsx
+        Pagination.test.tsx
+```
+
+**Paso 2**: Implementa `Tabs` siguiendo el patrón de la sección de conceptos. Agrega estas variantes al tipo de contexto:
+
+```tsx
+// src/components/ui/tabs/Tabs.tsx
+import React from 'react';
+
+interface TabsContextValue {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  orientation: 'horizontal' | 'vertical';
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
+
+function useTabsContext() {
+  const ctx = React.useContext(TabsContext);
+  if (!ctx) throw new Error('useTabsContext: must be used inside <Tabs>');
+  return ctx;
+}
+
+interface TabsProps {
+  children: React.ReactNode;
+  defaultTab: string;
+  orientation?: 'horizontal' | 'vertical';
+}
+
+function Tabs({ children, defaultTab, orientation = 'horizontal' }: TabsProps) {
+  const [activeTab, setActiveTab] = React.useState(defaultTab);
+  return (
+    <TabsContext.Provider value={{ activeTab, setActiveTab, orientation }}>
+      <div data-orientation={orientation} className="tabs-root">
+        {children}
+      </div>
+    </TabsContext.Provider>
+  );
+}
+
+function TabList({ children }: { children: React.ReactNode }) {
+  const { orientation } = useTabsContext();
+  return (
+    <div role="tablist" aria-orientation={orientation} className="tabs-list">
+      {children}
+    </div>
+  );
+}
+
+function TabTrigger({ value, children }: { value: string; children: React.ReactNode }) {
+  const { activeTab, setActiveTab } = useTabsContext();
+  const isActive = activeTab === value;
+  return (
+    <button
+      role="tab"
+      aria-selected={isActive}
+      tabIndex={isActive ? 0 : -1}
+      onClick={() => setActiveTab(value)}
+      className={isActive ? 'tab-trigger active' : 'tab-trigger'}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabPanel({ value, children }: { value: string; children: React.ReactNode }) {
+  const { activeTab } = useTabsContext();
+  if (activeTab !== value) return null;
+  return (
+    <div role="tabpanel" className="tab-panel">
+      {children}
+    </div>
+  );
+}
+
+Tabs.List = TabList;
+Tabs.Trigger = TabTrigger;
+Tabs.Panel = TabPanel;
+
+export { Tabs };
+```
+
+**Paso 3**: Implementa `Pagination` con render props y generic para el estado extendido.
+
+```tsx
+// src/components/ui/pagination/Pagination.tsx
+import React from 'react';
+
+export interface PaginationState {
+  currentPage: number;
+  totalPages: number;
+  pageSize: number;
+  totalItems: number;
+  goToPage: (page: number) => void;
+  goNext: () => void;
+  goPrev: () => void;
+  canGoNext: boolean;
+  canGoPrev: boolean;
+  startIndex: number;
+  endIndex: number;
+}
+
+interface PaginationProps {
+  totalItems: number;
+  pageSize?: number;
+  initialPage?: number;
+  children: (state: PaginationState) => React.ReactNode;
+}
+
+export function Pagination({
+  totalItems,
+  pageSize = 10,
+  initialPage = 1,
+  children,
+}: PaginationProps) {
+  const [currentPage, setCurrentPage] = React.useState(initialPage);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+  const safeGoToPage = (page: number) => {
+    setCurrentPage(Math.min(Math.max(1, page), totalPages));
+  };
+
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize - 1, totalItems - 1);
+
+  const state: PaginationState = {
+    currentPage,
+    totalPages,
+    pageSize,
+    totalItems,
+    goToPage: safeGoToPage,
+    goNext: () => safeGoToPage(currentPage + 1),
+    goPrev: () => safeGoToPage(currentPage - 1),
+    canGoNext: currentPage < totalPages,
+    canGoPrev: currentPage > 1,
+    startIndex,
+    endIndex,
+  };
+
+  return <>{children(state)}</>;
+}
+```
+
+**Paso 4**: Úsalos juntos en un componente de ejemplo.
+
+```tsx
+// src/features/sales/components/SalesDashboard.tsx
+import { Tabs } from '@/components/ui/tabs/Tabs';
+import { Pagination } from '@/components/ui/pagination/Pagination';
+
+const SALES_DATA = Array.from({ length: 47 }, (_, i) => ({
+  id: `sale-${i + 1}`,
+  amount: Math.floor(Math.random() * 1000),
+}));
+
+export function SalesDashboard() {
+  return (
+    <Tabs defaultTab="list">
+      <Tabs.List>
+        <Tabs.Trigger value="list">Lista de ventas</Tabs.Trigger>
+        <Tabs.Trigger value="summary">Resumen</Tabs.Trigger>
+      </Tabs.List>
+
+      <Tabs.Panel value="list">
+        <Pagination totalItems={SALES_DATA.length} pageSize={10}>
+          {({ currentPage, totalPages, startIndex, endIndex, goNext, goPrev, canGoNext, canGoPrev }) => (
+            <div>
+              <ul>
+                {SALES_DATA.slice(startIndex, endIndex + 1).map((sale) => (
+                  <li key={sale.id}>{sale.id} — ${sale.amount}</li>
+                ))}
+              </ul>
+              <div className="flex gap-2 mt-4">
+                <button onClick={goPrev} disabled={!canGoPrev}>Anterior</button>
+                <span>Página {currentPage} de {totalPages}</span>
+                <button onClick={goNext} disabled={!canGoNext}>Siguiente</button>
+              </div>
+            </div>
+          )}
+        </Pagination>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="summary">
+        <p>Total: {SALES_DATA.length} ventas registradas.</p>
+      </Tabs.Panel>
+    </Tabs>
+  );
+}
+```
+
+**Verificación**: abre `SalesDashboard` en el browser y confirma que:
+
+- Las tabs cambian sin recargar la página.
+- La paginación muestra 10 items por página y navega correctamente.
+- El componente `Pagination` no sabe nada de cómo se ve la UI — eso lo decide el caller.
+
+</LabSpec>
+
+## 3. Checkpoint
+
+<Checkpoint unit="react-advanced-patterns">
+
+1. ¿Cuál es la diferencia entre pasar estado vía props y compartirlo implícitamente con Context en un compound component? ¿Cuándo la opción implícita es preferible?
+2. ¿Por qué el patrón render props funciona mejor cuando la lógica y la presentación son ortogonales? ¿En qué casos preferirías un custom hook en vez de render props?
+3. En la context composition, ¿por qué el orden de los providers en el array importa? Explica qué pasaría si `TenantProvider` fuera el primero y `AuthProvider` el segundo, cuando el tenant depende del usuario autenticado.
+
+- [ ] Implementé el componente `Tabs` con el patrón compound component y el estado compartido vía Context, sin exponer el estado interno como props de los hijos.
+- [ ] Implementé `Pagination` con render props y puedo reusar la lógica de paginación con diferentes presentaciones sin duplicar código.
+- [ ] Puedo explicar el trade-off entre compound components (estado implícito, API limpia) y props explícitas (más verboso, más predecible).
+
+</Checkpoint>
+
+## Próxima unidad → [TanStack Query avanzado](../tanstack-query-advanced/)
