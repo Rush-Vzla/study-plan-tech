@@ -41,9 +41,9 @@ Eso es un bug de seguridad, no solo un bug de UX. En un sistema con dinero de po
 La solución es simple: el `tenantId` forma parte de cada query key de datos tenant-específicos.
 
 ```ts
-queryKey: ['tenant', businessId, 'sales']
-queryKey: ['tenant', businessId, 'inventory']
-queryKey: ['tenant', businessId, 'reports', reportId]
+queryKey: ['tenant', businessId, 'sales'];
+queryKey: ['tenant', businessId, 'inventory'];
+queryKey: ['tenant', businessId, 'reports', reportId];
 ```
 
 Con este patrón, los datos de Negocio A y Negocio B nunca comparten cache. Son queries distintas.
@@ -51,8 +51,8 @@ Con este patrón, los datos de Negocio A y Negocio B nunca comparten cache. Son 
 Fíjate que no todos los datos son tenant-específicos. La lista de países, los códigos de moneda, la configuración global del sistema — esos pueden ir sin el prefijo `tenant`:
 
 ```ts
-queryKey: ['currencies']
-queryKey: ['countries']
+queryKey: ['currencies'];
+queryKey: ['countries'];
 ```
 
 ### Resetear el QueryClient al cambiar de tenant
@@ -112,9 +112,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <TenantContext.Provider value={{ businessId, switchTenant }}>
-      {children}
-    </TenantContext.Provider>
+    <TenantContext.Provider value={{ businessId, switchTenant }}>{children}</TenantContext.Provider>
   );
 }
 

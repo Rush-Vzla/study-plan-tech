@@ -1,5 +1,5 @@
 ---
-title: "Redis + BullMQ: jobs en background"
+title: 'Redis + BullMQ: jobs en background'
 description: Queue de jobs con retries y dead letter queue usando BullMQ sobre Redis — para OTPs, emails, rate limiting y tareas asincrónicas en Rush.
 sidebar:
   order: 13
@@ -15,10 +15,10 @@ learning_outcomes:
   - Implementar retries con backoff exponencial y dead letter queue
   - Usar Redis para rate limiting distribuido
   - Entender cuándo un job debe ir a la dead letter queue
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -34,13 +34,13 @@ BullMQ es la librería de queue que usa Rush para esto. Funciona sobre Redis —
 
 ### Cuándo usar un job vs hacer el trabajo directo
 
-| Situación | Directo en request | Job en BullMQ |
-|-----------|--------------------|----|
-| Query rápida (&lt;100ms) | ✓ | No necesario |
-| Envío de email | No | ✓ |
-| Cálculo de KPI | No | ✓ |
-| Notificación push | No | ✓ |
-| Webhook a sistema externo | No | ✓ |
+| Situación                 | Directo en request | Job en BullMQ |
+| ------------------------- | ------------------ | ------------- |
+| Query rápida (&lt;100ms)  | ✓                  | No necesario  |
+| Envío de email            | No                 | ✓             |
+| Cálculo de KPI            | No                 | ✓             |
+| Notificación push         | No                 | ✓             |
+| Webhook a sistema externo | No                 | ✓             |
 
 ### Configurar BullMQ en NestJS
 
@@ -113,7 +113,12 @@ Redis también sirve para rate limiting distribuido — funciona en múltiples i
 
 ```ts
 // src/common/guards/rate-limit.guard.ts
-import { Injectable, CanActivate, ExecutionContext, TooManyRequestsException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  TooManyRequestsException,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 
 const WINDOW_SECONDS = 60;

@@ -1,5 +1,5 @@
 ---
-title: "Manejo de errores con estilo"
+title: 'Manejo de errores con estilo'
 description: Exception filters globales en NestJS para separar domain errors de HTTP errors y entregar respuestas de error consistentes.
 sidebar:
   order: 3
@@ -14,10 +14,10 @@ learning_outcomes:
   - Separar domain errors de HTTP errors con clases propias
   - Entregar respuestas de error con forma consistente en toda la API
   - Loggear errores sin exponer stack traces al cliente
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  nestjs: "11.x"
-  node: "24 LTS"
+  nestjs: '11.x'
+  node: '24 LTS'
 lab_runnable: false
 extra: false
 ---
@@ -107,7 +107,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    this.logger.error('Unhandled exception', exception instanceof Error ? exception.stack : String(exception));
+    this.logger.error(
+      'Unhandled exception',
+      exception instanceof Error ? exception.stack : String(exception),
+    );
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: 'INTERNAL_ERROR',
       message: 'An unexpected error occurred',

@@ -73,7 +73,7 @@ El patrón es:
 3. Cuando el usuario cambia la página, TanStack Query hace un nuevo request con los parámetros actualizados
 
 ```ts
-queryKey: ['tenant', businessId, 'sales', { page, sort, filter }]
+queryKey: ['tenant', businessId, 'sales', { page, sort, filter }];
 ```
 
 ## 2. Lab guiado
@@ -190,7 +190,8 @@ export function SalesTable() {
     state: { sorting, pagination: { pageIndex: page, pageSize: 20 } },
     onSortingChange: setSorting,
     onPaginationChange: (updater) => {
-      const next = typeof updater === 'function' ? updater({ pageIndex: page, pageSize: 20 }) : updater;
+      const next =
+        typeof updater === 'function' ? updater({ pageIndex: page, pageSize: 20 }) : updater;
       setPage(next.pageIndex);
     },
   });

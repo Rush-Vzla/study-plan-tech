@@ -1,5 +1,5 @@
 ---
-title: "Drizzle avanzado: CTEs, window functions y batch queries"
+title: 'Drizzle avanzado: CTEs, window functions y batch queries'
 description: WITH CTEs, window functions, batch queries y subqueries tipadas — las herramientas de Drizzle que necesitas cuando las queries simples no alcanzan.
 sidebar:
   order: 102
@@ -15,10 +15,10 @@ prerequisites:
   - track-be/drizzle-fundamentos
   - track-be/kpi-snapshots
 learning_outcomes:
-  - "Escribir CTEs con WITH para queries complejas sin subqueries anidadas"
-  - "Usar window functions (ROW_NUMBER, LAG, RANK) para análisis de series temporales"
-  - "Ejecutar batch queries con db.batch() para múltiples operaciones en una sola ida"
-  - "Construir subqueries tipadas que Drizzle pueda validar en compilación"
+  - 'Escribir CTEs con WITH para queries complejas sin subqueries anidadas'
+  - 'Usar window functions (ROW_NUMBER, LAG, RANK) para análisis de series temporales'
+  - 'Ejecutar batch queries con db.batch() para múltiples operaciones en una sola ida'
+  - 'Construir subqueries tipadas que Drizzle pueda validar en compilación'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -45,10 +45,7 @@ import { db } from '../drizzle/drizzle.provider';
 import { salesEvents } from '../drizzle/schema';
 import { sql, gt } from 'drizzle-orm';
 
-async function getMonthlySalesAboveThreshold(
-  businessId: string,
-  thresholdUsd: number,
-) {
+async function getMonthlySalesAboveThreshold(businessId: string, thresholdUsd: number) {
   const monthlySales = db.$with('monthly_sales').as(
     db
       .select({
@@ -108,11 +105,7 @@ Para operaciones donde necesitas ejecutar varias queries de forma atómica:
 
 ```ts
 // src/snapshots/snapshot.service.ts
-async function createDailySnapshot(
-  businessId: string,
-  date: Date,
-  kpis: KpiData,
-) {
+async function createDailySnapshot(businessId: string, date: Date, kpis: KpiData) {
   return db.transaction(async (tx) => {
     await tx
       .insert(kpiSnapshots)
@@ -152,17 +145,13 @@ Drizzle permite subqueries tipadas que TypeScript puede validar en tiempo de com
 const activeBusinessesSubquery = db
   .select({ businessId: salesEvents.businessId })
   .from(salesEvents)
-  .where(
-    sql`${salesEvents.createdAt} >= DATE_TRUNC('month', NOW())`,
-  )
+  .where(sql`${salesEvents.createdAt} >= DATE_TRUNC('month', NOW())`)
   .as('active_businesses');
 
 const result = await db
   .select()
   .from(businesses)
-  .where(
-    sql`${businesses.id} IN (SELECT business_id FROM ${activeBusinessesSubquery})`,
-  );
+  .where(sql`${businesses.id} IN (SELECT business_id FROM ${activeBusinessesSubquery})`);
 ```
 
 La diferencia con usar `sql` raw: Drizzle sabe los tipos de `activeBusinessesSubquery.businessId`. Si cambias el nombre del campo en el schema, el compilador lo detecta.

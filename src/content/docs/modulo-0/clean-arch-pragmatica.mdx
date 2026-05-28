@@ -10,13 +10,13 @@ tags: [obligatorio, m0]
 track: modulo-0
 unit_type: lectura-lab-checkpoint
 estimated_hours: 3
-prerequisites: ["modulo-0/ts-estricto"]
+prerequisites: ['modulo-0/ts-estricto']
 learning_outcomes:
   - Entender las tres capas de Clean Architecture y sus responsabilidades
   - Aplicar la regla de dependencias (siempre hacia adentro)
   - Identificar qué código pertenece a cada capa en Rush
   - Reconocer cuándo Clean Architecture ayuda y cuándo es sobreingeniería
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 lab_runnable: false
 extra: false
 ---
@@ -179,9 +179,7 @@ export class Money {
 
   add(other: Money): Money {
     if (this.currency !== other.currency) {
-      throw new TypeError(
-        `Currency mismatch: ${this.currency} vs ${other.currency}`,
-      );
+      throw new TypeError(`Currency mismatch: ${this.currency} vs ${other.currency}`);
     }
     return new Money(this.amount + other.amount, this.currency);
   }

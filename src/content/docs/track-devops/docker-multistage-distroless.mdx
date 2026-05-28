@@ -1,6 +1,6 @@
 ---
-title: "Docker multi-stage con imagen distroless"
-description: "Construye imágenes de producción mínimas, seguras y sin shell usando multi-stage builds y gcr.io/distroless/nodejs:nonroot."
+title: 'Docker multi-stage con imagen distroless'
+description: 'Construye imágenes de producción mínimas, seguras y sin shell usando multi-stage builds y gcr.io/distroless/nodejs:nonroot.'
 sidebar:
   order: 1
 unit_type: lectura-lab-checkpoint
@@ -8,10 +8,10 @@ track: 'track-devops'
 estimated_hours: 4
 prerequisites: ['modulo-0/docker-basico']
 learning_outcomes:
-  - "Entender por qué una imagen de producción no debe tener shell ni herramientas de desarrollo"
-  - "Separar las etapas deps, build y runtime en un Dockerfile multi-stage"
-  - "Usar gcr.io/distroless/nodejs:nonroot y configurar USER nonroot explícitamente"
-  - "Validar que la imagen resultante no tiene vulnerabilidades críticas obvias"
+  - 'Entender por qué una imagen de producción no debe tener shell ni herramientas de desarrollo'
+  - 'Separar las etapas deps, build y runtime en un Dockerfile multi-stage'
+  - 'Usar gcr.io/distroless/nodejs:nonroot y configurar USER nonroot explícitamente'
+  - 'Validar que la imagen resultante no tiene vulnerabilidades críticas obvias'
 tags: ['obligatorio', 'track-devops']
 last_updated: '2026-05-18'
 stack_versions: { node: '24', docker: '27' }

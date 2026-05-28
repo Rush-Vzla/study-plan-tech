@@ -10,13 +10,13 @@ tags: [obligatorio, m0]
 track: modulo-0
 unit_type: lectura-lab-checkpoint
 estimated_hours: 2
-prerequisites: ["modulo-0/sdd-flujo"]
+prerequisites: ['modulo-0/sdd-flujo']
 learning_outcomes:
   - Usar Claude Code como herramienta en el terminal sin perder el control del proceso
   - Entender qué es Engram y cómo funciona como memoria cross-session
   - Integrar Claude Code en el flujo SDD correctamente
   - Identificar cuándo usar Claude y cuándo no usarlo
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 lab_runnable: false
 extra: false
 ---
@@ -73,10 +73,10 @@ Engram guarda decisiones, bugs, convenciones y contexto del proyecto en una base
 
 ```ts
 mem_save({
-  title: "Decisión: usar TIMESTAMPTZ en todos los timestamps",
-  type: "decision",
-  content: "Todos los campos de fecha/hora usan TIMESTAMPTZ..."
-})
+  title: 'Decisión: usar TIMESTAMPTZ en todos los timestamps',
+  type: 'decision',
+  content: 'Todos los campos de fecha/hora usan TIMESTAMPTZ...',
+});
 ```
 
 La próxima sesión, el agente busca en Engram antes de preguntar:

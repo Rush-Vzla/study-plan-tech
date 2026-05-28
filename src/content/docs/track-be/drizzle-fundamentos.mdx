@@ -1,5 +1,5 @@
 ---
-title: "Drizzle ORM: SQL-first de verdad"
+title: 'Drizzle ORM: SQL-first de verdad'
 description: Schema definition, migrations, queries tipadas y relaciones con Drizzle ORM sobre PostgreSQL 17 — sin N+1 ocultos.
 sidebar:
   order: 4
@@ -16,12 +16,12 @@ learning_outcomes:
   - Escribir queries tipadas con relaciones sin N+1 ocultos
   - Integrar Drizzle como provider de NestJS
   - Entender por qué Drizzle es SQL-first y qué ventaja tiene sobre ORMs más abstractos
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
-  drizzle: "0.x"
-  postgres: "17"
+  node: '24 LTS'
+  nestjs: '11.x'
+  drizzle: '0.x'
+  postgres: '17'
 lab_runnable: false
 extra: false
 ---
@@ -184,7 +184,9 @@ export const businesses = pgTable('businesses', {
 
 export const salesEvents = pgTable('sales_events', {
   id: uuid('id').defaultRandom().primaryKey(),
-  businessId: uuid('business_id').notNull().references(() => businesses.id),
+  businessId: uuid('business_id')
+    .notNull()
+    .references(() => businesses.id),
   amount: numeric('amount', { precision: 19, scale: 4 }).notNull(),
   currency: text('currency').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

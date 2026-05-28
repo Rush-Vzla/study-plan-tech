@@ -1,5 +1,5 @@
 ---
-title: "Pino: logs estructurados que no filtran datos"
+title: 'Pino: logs estructurados que no filtran datos'
 description: Cómo configurar Pino en NestJS para emitir JSON estructurado que va a Loki — con sanitización para nunca loggear montos, RIF, tokens ni teléfonos.
 sidebar:
   order: 22
@@ -15,10 +15,10 @@ learning_outcomes:
   - Emitir logs JSON estructurados con request ID y context
   - Sanitizar logs para no filtrar datos sensibles
   - Entender qué logs van a Loki y cómo se consultan
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -47,9 +47,10 @@ import { LoggerModule } from 'nestjs-pino';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env['NODE_ENV'] === 'production' ? 'info' : 'debug',
-        transport: process.env['NODE_ENV'] !== 'production'
-          ? { target: 'pino-pretty', options: { colorize: true } }
-          : undefined,
+        transport:
+          process.env['NODE_ENV'] !== 'production'
+            ? { target: 'pino-pretty', options: { colorize: true } }
+            : undefined,
         serializers: {
           req: (req) => ({
             method: req.method,
@@ -103,13 +104,13 @@ Fíjate en lo que NO está en los logs: el `amount`. Los montos de ventas son da
 
 ### Qué nunca va en los logs
 
-| Dato | Razón |
-|------|-------|
-| Montos de ventas y costos | Datos financieros |
-| RIF del business | Identificador fiscal privado |
-| Tokens y passwords | Credenciales |
-| Teléfonos y emails | PII |
-| Datos de tarjetas | PCI |
+| Dato                      | Razón                        |
+| ------------------------- | ---------------------------- |
+| Montos de ventas y costos | Datos financieros            |
+| RIF del business          | Identificador fiscal privado |
+| Tokens y passwords        | Credenciales                 |
+| Teléfonos y emails        | PII                          |
+| Datos de tarjetas         | PCI                          |
 
 Si necesitas debug de un monto en particular, hazlo con un script de auditoría contra la base de datos directamente — no a través de los logs.
 
@@ -161,10 +162,7 @@ const SENSITIVE_FIELDS = ['password', 'token', 'amount', 'rif', 'phone'];
 
 export function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(obj).map(([k, v]) => [
-      k,
-      SENSITIVE_FIELDS.includes(k) ? '[REDACTED]' : v,
-    ]),
+    Object.entries(obj).map(([k, v]) => [k, SENSITIVE_FIELDS.includes(k) ? '[REDACTED]' : v]),
   );
 }
 ```

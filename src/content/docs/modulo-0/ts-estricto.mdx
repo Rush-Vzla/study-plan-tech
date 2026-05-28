@@ -16,9 +16,9 @@ learning_outcomes:
   - Usar genéricos para escribir código reutilizable sin perder tipos
   - Inferir tipos desde schemas Zod en vez de duplicar definiciones
   - Eliminar any y as de tu código de forma permanente
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 stack_versions:
-  typescript: "6.0.3"
+  typescript: '6.0.3'
 lab_runnable: false
 extra: false
 ---
@@ -182,10 +182,7 @@ Corre `npx tsc --noEmit` de nuevo — sin errores.
 
 ```ts
 // src/utils.ts
-export function findById<T extends { id: string }>(
-  items: T[],
-  id: string
-): T | undefined {
+export function findById<T extends { id: string }>(items: T[], id: string): T | undefined {
   return items.find((item) => item.id === id);
 }
 

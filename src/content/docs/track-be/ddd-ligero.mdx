@@ -1,5 +1,5 @@
 ---
-title: "DDD sin overengineering"
+title: 'DDD sin overengineering'
 description: Value objects (Money), domain errors y policies en Rush — sin aggregate roots complejos. El 80% del backend es insert + snapshot.
 sidebar:
   order: 18
@@ -15,10 +15,10 @@ learning_outcomes:
   - Implementar domain policies como funciones puras
   - Entender cuándo DDD agrega valor y cuándo es overengineering
   - Aplicar el patrón insert + snapshot para el 80% de los casos de Rush
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -75,9 +75,10 @@ Una policy es una regla de negocio que puede cambiar. En Rush, las policies son 
 
 ```ts
 // src/sales/domain/sales.policies.ts
-export function canRecordSale(params: {
-  businessStatus: 'active' | 'suspended' | 'onboarding';
-}): { allowed: boolean; reason?: string } {
+export function canRecordSale(params: { businessStatus: 'active' | 'suspended' | 'onboarding' }): {
+  allowed: boolean;
+  reason?: string;
+} {
   if (params.businessStatus === 'suspended') {
     return { allowed: false, reason: 'Business is suspended' };
   }

@@ -16,10 +16,10 @@ learning_outcomes:
   - Trabajar con pnpm workspaces para monorepos
   - Entender qué es un lockfile y por qué no se toca manualmente
   - Publicar un paquete interno a GitHub Packages
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 stack_versions:
-  pnpm: "11.1.2"
-  node: "20.18.0"
+  pnpm: '11.1.2'
+  node: '20.18.0'
 lab_runnable: false
 extra: false
 ---
@@ -74,8 +74,8 @@ rush-api/                    ← repo principal del backend
 ```yaml
 # pnpm-workspace.yaml
 packages:
-  - "packages/*"
-  - "apps/*"
+  - 'packages/*'
+  - 'apps/*'
 ```
 
 Con eso, `pnpm install` desde el root instala todas las dependencias de todos los packages.
@@ -145,7 +145,7 @@ Crea `pnpm-workspace.yaml`:
 
 ```yaml
 packages:
-  - "packages/*"
+  - 'packages/*'
 ```
 
 Crea la estructura de packages:

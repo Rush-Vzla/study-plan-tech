@@ -39,15 +39,15 @@ Tailwind tiene una clase para casi cualquier propiedad CSS:
 ```html
 <!-- padding, margen, tipografía -->
 <div class="p-4 mt-2 text-sm font-medium text-gray-700">
-
-<!-- flex layout -->
-<div class="flex items-center gap-3 justify-between">
-
-<!-- grid -->
-<div class="grid grid-cols-3 gap-4">
-
-<!-- borders y shadows -->
-<div class="border border-gray-200 rounded-lg shadow-sm">
+  <!-- flex layout -->
+  <div class="flex items-center gap-3 justify-between">
+    <!-- grid -->
+    <div class="grid grid-cols-3 gap-4">
+      <!-- borders y shadows -->
+      <div class="border border-gray-200 rounded-lg shadow-sm"></div>
+    </div>
+  </div>
+</div>
 ```
 
 Fíjate que Tailwind v4 cambia la configuración: en vez de un archivo `tailwind.config.js`, la configuración va en el CSS usando directivas nativas:
@@ -80,7 +80,7 @@ Rush usa los breakpoints por defecto de Tailwind (`sm`, `md`, `lg`, `xl`). No se
 Con `dark:` aplicas estilos cuando el usuario tiene dark mode activo:
 
 ```html
-<div class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+<div class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"></div>
 ```
 
 shadcn maneja dark mode con una clase `dark` en el `<html>`, no con `prefers-color-scheme`. Eso permite que el usuario pueda elegir el tema independientemente del sistema operativo.

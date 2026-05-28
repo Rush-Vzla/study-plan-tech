@@ -1,5 +1,5 @@
 ---
-title: "Event Sourcing completo: proyecciones, snapshots y cuándo usarlo"
+title: 'Event Sourcing completo: proyecciones, snapshots y cuándo usarlo'
 description: Proyecciones, snapshots de aggregate y los casos concretos donde Event Sourcing completo tiene sentido — más allá del patrón append-only que ya usa Rush.
 sidebar:
   order: 104
@@ -16,10 +16,10 @@ prerequisites:
   - track-be/compensating-events
   - track-be/kpi-snapshots
 learning_outcomes:
-  - "Diferenciar el patrón append-only de Rush del Event Sourcing completo"
-  - "Implementar proyecciones que reconstruyen estado desde un stream de eventos"
-  - "Usar snapshots de aggregate para evitar replay de streams largos"
-  - "Identificar los casos donde Event Sourcing completo justifica su complejidad"
+  - 'Diferenciar el patrón append-only de Rush del Event Sourcing completo'
+  - 'Implementar proyecciones que reconstruyen estado desde un stream de eventos'
+  - 'Usar snapshots de aggregate para evitar replay de streams largos'
+  - 'Identificar los casos donde Event Sourcing completo justifica su complejidad'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -37,14 +37,14 @@ Rush no usa Event Sourcing completo hoy. Usa append-only events — que es parte
 
 Fíjate en la diferencia:
 
-| Aspecto | Rush (append-only) | Event Sourcing completo |
-| --- | --- | --- |
-| Estado actual | Columna `current_state` en tabla separada | Reconstruido al hacer replay de eventos |
-| Acceso a estado | SELECT directo | Requiere replay o proyección |
-| Snapshots | KPI snapshots separados | Snapshots del aggregate para cortar el replay |
-| Queries | SQL estándar sobre estado | Queries sobre proyecciones (read models) |
-| Complejidad | Baja | Alta |
-| Historial completo | Sí (solo escritura) | Sí (es el source of truth) |
+| Aspecto            | Rush (append-only)                        | Event Sourcing completo                       |
+| ------------------ | ----------------------------------------- | --------------------------------------------- |
+| Estado actual      | Columna `current_state` en tabla separada | Reconstruido al hacer replay de eventos       |
+| Acceso a estado    | SELECT directo                            | Requiere replay o proyección                  |
+| Snapshots          | KPI snapshots separados                   | Snapshots del aggregate para cortar el replay |
+| Queries            | SQL estándar sobre estado                 | Queries sobre proyecciones (read models)      |
+| Complejidad        | Baja                                      | Alta                                          |
+| Historial completo | Sí (solo escritura)                       | Sí (es el source of truth)                    |
 
 Rush hace lo correcto para su etapa actual: guarda eventos para auditoría y calcula estado materializado periódicamente. Event Sourcing completo invierte eso: los eventos son el estado principal y el estado derivado es siempre una proyección.
 
@@ -127,19 +127,13 @@ interface AggregateSnapshot {
   createdAt: Date;
 }
 
-async function loadSaleWithSnapshot(
-  saleId: string,
-  db: Database,
-): Promise<SaleState | null> {
+async function loadSaleWithSnapshot(saleId: string, db: Database): Promise<SaleState | null> {
   // 1. Buscar el snapshot más reciente
   const snapshot = await db
     .select()
     .from(aggregateSnapshots)
     .where(
-      and(
-        eq(aggregateSnapshots.aggregateId, saleId),
-        eq(aggregateSnapshots.aggregateType, 'Sale'),
-      ),
+      and(eq(aggregateSnapshots.aggregateId, saleId), eq(aggregateSnapshots.aggregateType, 'Sale')),
     )
     .orderBy(desc(aggregateSnapshots.lastEventSequence))
     .limit(1);
@@ -151,12 +145,7 @@ async function loadSaleWithSnapshot(
   const events = await db
     .select()
     .from(saleEvents)
-    .where(
-      and(
-        eq(saleEvents.aggregateId, saleId),
-        gt(saleEvents.sequence, fromSequence),
-      ),
-    )
+    .where(and(eq(saleEvents.aggregateId, saleId), gt(saleEvents.sequence, fromSequence)))
     .orderBy(asc(saleEvents.sequence));
 
   // 3. Aplicar eventos sobre el estado del snapshot
@@ -270,7 +259,13 @@ export function projectFromEvents(events: SaleEvent[]): SaleState | null {
   for (const ev of events) {
     switch (ev.type) {
       case 'SaleCreated':
-        state = { id: ev.saleId, businessId: ev.businessId, amount: ev.amount, currency: ev.currency, status: 'pending' };
+        state = {
+          id: ev.saleId,
+          businessId: ev.businessId,
+          amount: ev.amount,
+          currency: ev.currency,
+          status: 'pending',
+        };
         break;
       case 'SaleAmountUpdated':
         if (state) state = { ...state, amount: ev.newAmount };

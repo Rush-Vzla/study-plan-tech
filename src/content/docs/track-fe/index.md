@@ -42,27 +42,27 @@ Antes de empezar este track necesitas tener dominadas las unidades del Módulo 0
 
 ## Orden recomendado de las 19 unidades
 
-| # | Unidad | Horas | Archivo |
-| --- | --- | --- | --- |
-| 1 | React + Vite: el proyecto arranca | ~2 hs | [react-vite-setup](react-vite-setup/) |
-| 2 | React Router: navegación sin CVEs de supply chain | ~3 hs | [react-router](react-router/) |
-| 3 | Feature-first: carpetas que gritan el dominio | ~3 hs | [feature-first](feature-first/) |
-| 4 | TanStack Query: data fetching sin dolor | ~4 hs | [tanstack-query-fundamentos](tanstack-query-fundamentos/) |
-| 5 | Tenant-aware query keys: el cache que no miente | ~3 hs | [tanstack-query-tenant-aware](tanstack-query-tenant-aware/) |
-| 6 | TanStack Table: tablas tipadas y potentes | ~3 hs | [tanstack-table](tanstack-table/) |
-| 7 | TanStack Virtual: listas largas sin lag | ~2 hs | [tanstack-virtual](tanstack-virtual/) |
-| 8 | shadcn/ui: componentes que son tuyos | ~3 hs | [shadcn-ui](shadcn-ui/) |
-| 9 | Tailwind: styling sin CSS-in-JS | ~2 hs | [tailwind-styling](tailwind-styling/) |
-| 10 | React Hook Form + Zod: formularios tipados | ~3 hs | [react-hook-form-zod](react-hook-form-zod/) |
-| 11 | `@rush/shared-schemas` en el frontend | ~2 hs | [shared-schemas-fe](shared-schemas-fe/) |
-| 12 | Internacionalización es-VE/es-AR/en/pt-BR | ~2 hs | [i18n-rush](i18n-rush/) |
-| 13 | Auth en el frontend: tokens y tenant | ~3 hs | [auth-frontend](auth-frontend/) |
-| 14 | Container vs presentational: separar lógica de UI | ~2 hs | [container-presentational](container-presentational/) |
-| 15 | Error Boundaries: la UI que no rompe todo | ~2 hs | [error-boundaries](error-boundaries/) |
-| 16 | Vitest + Testing Library para frontend | ~3 hs | [vitest-react](vitest-react/) |
-| 17 | Playwright: E2E de flujos monetarios | ~3 hs | [playwright-e2e](playwright-e2e/) |
-| 18 | Performance frontend sin obsesionarse | ~2 hs | [performance-fe](performance-fe/) |
-| 19 | CSP y CORS desde el frontend | ~2 hs | [csp-cors-frontend](csp-cors-frontend/) |
+| #   | Unidad                                            | Horas | Archivo                                                     |
+| --- | ------------------------------------------------- | ----- | ----------------------------------------------------------- |
+| 1   | React + Vite: el proyecto arranca                 | ~2 hs | [react-vite-setup](react-vite-setup/)                       |
+| 2   | React Router: navegación sin CVEs de supply chain | ~3 hs | [react-router](react-router/)                               |
+| 3   | Feature-first: carpetas que gritan el dominio     | ~3 hs | [feature-first](feature-first/)                             |
+| 4   | TanStack Query: data fetching sin dolor           | ~4 hs | [tanstack-query-fundamentos](tanstack-query-fundamentos/)   |
+| 5   | Tenant-aware query keys: el cache que no miente   | ~3 hs | [tanstack-query-tenant-aware](tanstack-query-tenant-aware/) |
+| 6   | TanStack Table: tablas tipadas y potentes         | ~3 hs | [tanstack-table](tanstack-table/)                           |
+| 7   | TanStack Virtual: listas largas sin lag           | ~2 hs | [tanstack-virtual](tanstack-virtual/)                       |
+| 8   | shadcn/ui: componentes que son tuyos              | ~3 hs | [shadcn-ui](shadcn-ui/)                                     |
+| 9   | Tailwind: styling sin CSS-in-JS                   | ~2 hs | [tailwind-styling](tailwind-styling/)                       |
+| 10  | React Hook Form + Zod: formularios tipados        | ~3 hs | [react-hook-form-zod](react-hook-form-zod/)                 |
+| 11  | `@rush/shared-schemas` en el frontend             | ~2 hs | [shared-schemas-fe](shared-schemas-fe/)                     |
+| 12  | Internacionalización es-VE/es-AR/en/pt-BR         | ~2 hs | [i18n-rush](i18n-rush/)                                     |
+| 13  | Auth en el frontend: tokens y tenant              | ~3 hs | [auth-frontend](auth-frontend/)                             |
+| 14  | Container vs presentational: separar lógica de UI | ~2 hs | [container-presentational](container-presentational/)       |
+| 15  | Error Boundaries: la UI que no rompe todo         | ~2 hs | [error-boundaries](error-boundaries/)                       |
+| 16  | Vitest + Testing Library para frontend            | ~3 hs | [vitest-react](vitest-react/)                               |
+| 17  | Playwright: E2E de flujos monetarios              | ~3 hs | [playwright-e2e](playwright-e2e/)                           |
+| 18  | Performance frontend sin obsesionarse             | ~2 hs | [performance-fe](performance-fe/)                           |
+| 19  | CSP y CORS desde el frontend                      | ~2 hs | [csp-cors-frontend](csp-cors-frontend/)                     |
 
 **Total estimado**: ~52 horas de estudio activo (lab + lectura).
 

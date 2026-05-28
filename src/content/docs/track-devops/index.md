@@ -1,6 +1,6 @@
 ---
-title: "Track DevOps"
-description: "Aprende a desplegar, operar y monitorear el stack de Rush sobre un Droplet de DigitalOcean."
+title: 'Track DevOps'
+description: 'Aprende a desplegar, operar y monitorear el stack de Rush sobre un Droplet de DigitalOcean.'
 unit_type: indice
 track: 'track-devops'
 estimated_hours: 42
@@ -28,22 +28,22 @@ Rush corre sobre un Droplet √∫nico de DigitalOcean. No hay Kubernetes, no hay m√
 
 Esto es lo que vas a aprender:
 
-| # | Unidad | Horas |
-|---|--------|-------|
-| 1 | [Docker multi-stage con imagen distroless](./docker-multistage-distroless/) | 4h |
-| 2 | [docker-compose en el Droplet](./docker-compose-droplet/) | 3h |
-| 3 | [Caddy como reverse proxy](./caddy-reverse-proxy/) | 3h |
-| 4 | [Cloudflare: DNS, CDN y WAF](./cloudflare-setup/) | 2h |
-| 5 | [Infisical para secretos en runtime](./infisical-secrets/) | 3h |
-| 6 | [Pipeline de GitHub Actions](./github-actions-pipeline/) | 5h |
-| 7 | [Trivy: escaneo de contenedores en CI](./trivy-container-scan/) | 2h |
-| 8 | [GitHub Container Registry](./ghcr-registry/) | 2h |
-| 9 | [Grafana + Loki + Prometheus](./grafana-loki-prometheus/) | 5h |
-| 10 | [OpenTelemetry y tracing](./opentelemetry-tracing/) | 3h |
-| 11 | [Expand-contract en deploys](./expand-contract-deploy/) | 2h |
-| 12 | [Pre-commit hooks con gitleaks](./pre-commit-hooks/) | 2h |
-| 13 | [Changesets y shared-schemas](./changesets-shared-schemas/) | 3h |
-| 14 | [Deploy al Droplet con rollback en 1 minuto](./droplet-single-node-deploy/) | 4h |
+| #   | Unidad                                                                      | Horas |
+| --- | --------------------------------------------------------------------------- | ----- |
+| 1   | [Docker multi-stage con imagen distroless](./docker-multistage-distroless/) | 4h    |
+| 2   | [docker-compose en el Droplet](./docker-compose-droplet/)                   | 3h    |
+| 3   | [Caddy como reverse proxy](./caddy-reverse-proxy/)                          | 3h    |
+| 4   | [Cloudflare: DNS, CDN y WAF](./cloudflare-setup/)                           | 2h    |
+| 5   | [Infisical para secretos en runtime](./infisical-secrets/)                  | 3h    |
+| 6   | [Pipeline de GitHub Actions](./github-actions-pipeline/)                    | 5h    |
+| 7   | [Trivy: escaneo de contenedores en CI](./trivy-container-scan/)             | 2h    |
+| 8   | [GitHub Container Registry](./ghcr-registry/)                               | 2h    |
+| 9   | [Grafana + Loki + Prometheus](./grafana-loki-prometheus/)                   | 5h    |
+| 10  | [OpenTelemetry y tracing](./opentelemetry-tracing/)                         | 3h    |
+| 11  | [Expand-contract en deploys](./expand-contract-deploy/)                     | 2h    |
+| 12  | [Pre-commit hooks con gitleaks](./pre-commit-hooks/)                        | 2h    |
+| 13  | [Changesets y shared-schemas](./changesets-shared-schemas/)                 | 3h    |
+| 14  | [Deploy al Droplet con rollback en 1 minuto](./droplet-single-node-deploy/) | 4h    |
 
 **Total estimado**: 43 horas de estudio y lab guiado.
 

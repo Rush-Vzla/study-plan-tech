@@ -1,5 +1,5 @@
 ---
-title: "Accesibilidad: no dejar a nadie afuera"
+title: 'Accesibilidad: no dejar a nadie afuera'
 description: ARIA roles, keyboard navigation y color contrast — cómo asegurar que Rush funcione para todos los usuarios, sin romper lo que shadcn/ui ya hace bien.
 sidebar:
   order: 104
@@ -15,10 +15,10 @@ prerequisites:
   - track-fe/shadcn-ui
   - track-fe/tailwind-styling
 learning_outcomes:
-  - "Entender para qué sirven los ARIA roles y cuándo NO agregarlos"
-  - "Implementar navegación por teclado en componentes custom"
-  - "Verificar contraste de color con herramientas de browser y criterios WCAG AA"
-  - "Identificar qué hace shadcn/ui por accesibilidad y cómo no romperlo al personalizar"
+  - 'Entender para qué sirven los ARIA roles y cuándo NO agregarlos'
+  - 'Implementar navegación por teclado en componentes custom'
+  - 'Verificar contraste de color con herramientas de browser y criterios WCAG AA'
+  - 'Identificar qué hace shadcn/ui por accesibilidad y cómo no romperlo al personalizar'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -246,7 +246,13 @@ export function SaleFormGood() {
   };
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} noValidate>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+      noValidate
+    >
       <div>
         <label htmlFor="sale-amount" className="text-gray-700 text-sm font-medium">
           Monto de la venta

@@ -1,5 +1,5 @@
 ---
-title: "Patrones avanzados de React"
+title: 'Patrones avanzados de React'
 description: Compound components, render props y context composition — los patrones que usan las librerías que Rush consume y que te ayudan a diseñar APIs de componentes más flexibles.
 sidebar:
   order: 101
@@ -16,10 +16,10 @@ prerequisites:
   - track-fe/container-presentational
   - track-fe/feature-first
 learning_outcomes:
-  - "Implementar el patrón compound component para APIs de componentes con estado compartido implícito"
-  - "Usar render props para inyectar lógica de renderizado sin crear acoplamiento"
-  - "Componer múltiples contextos sin generar provider nesting inmanejable"
-  - "Identificar cuándo cada patrón agrega valor vs cuándo complica sin necesidad"
+  - 'Implementar el patrón compound component para APIs de componentes con estado compartido implícito'
+  - 'Usar render props para inyectar lógica de renderizado sin crear acoplamiento'
+  - 'Componer múltiples contextos sin generar provider nesting inmanejable'
+  - 'Identificar cuándo cada patrón agrega valor vs cuándo complica sin necesidad'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -84,10 +84,7 @@ function Tabs({ children, defaultTab }: { children: React.ReactNode; defaultTab:
 function TabTrigger({ value, children }: { value: string; children: React.ReactNode }) {
   const { activeTab, setActiveTab } = useTabsContext();
   return (
-    <button
-      className={activeTab === value ? 'active' : ''}
-      onClick={() => setActiveTab(value)}
-    >
+    <button className={activeTab === value ? 'active' : ''} onClick={() => setActiveTab(value)}>
       {children}
     </button>
   );
@@ -164,9 +161,15 @@ Uso — la presentación es completamente libre:
 <Pagination totalItems={200} pageSize={10}>
   {({ currentPage, totalPages, goNext, goPrev, canGoNext, canGoPrev }) => (
     <div className="flex gap-2">
-      <button onClick={goPrev} disabled={!canGoPrev}>Anterior</button>
-      <span>{currentPage} / {totalPages}</span>
-      <button onClick={goNext} disabled={!canGoNext}>Siguiente</button>
+      <button onClick={goPrev} disabled={!canGoPrev}>
+        Anterior
+      </button>
+      <span>
+        {currentPage} / {totalPages}
+      </span>
+      <button onClick={goNext} disabled={!canGoNext}>
+        Siguiente
+      </button>
     </div>
   )}
 </Pagination>
@@ -405,17 +408,34 @@ export function SalesDashboard() {
 
       <Tabs.Panel value="list">
         <Pagination totalItems={SALES_DATA.length} pageSize={10}>
-          {({ currentPage, totalPages, startIndex, endIndex, goNext, goPrev, canGoNext, canGoPrev }) => (
+          {({
+            currentPage,
+            totalPages,
+            startIndex,
+            endIndex,
+            goNext,
+            goPrev,
+            canGoNext,
+            canGoPrev,
+          }) => (
             <div>
               <ul>
                 {SALES_DATA.slice(startIndex, endIndex + 1).map((sale) => (
-                  <li key={sale.id}>{sale.id} — ${sale.amount}</li>
+                  <li key={sale.id}>
+                    {sale.id} — ${sale.amount}
+                  </li>
                 ))}
               </ul>
               <div className="flex gap-2 mt-4">
-                <button onClick={goPrev} disabled={!canGoPrev}>Anterior</button>
-                <span>Página {currentPage} de {totalPages}</span>
-                <button onClick={goNext} disabled={!canGoNext}>Siguiente</button>
+                <button onClick={goPrev} disabled={!canGoPrev}>
+                  Anterior
+                </button>
+                <span>
+                  Página {currentPage} de {totalPages}
+                </span>
+                <button onClick={goNext} disabled={!canGoNext}>
+                  Siguiente
+                </button>
               </div>
             </div>
           )}

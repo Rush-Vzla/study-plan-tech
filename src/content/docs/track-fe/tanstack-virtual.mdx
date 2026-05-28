@@ -121,10 +121,7 @@ export function SalesEventList() {
   if (isLoading) return <div>Cargando eventos...</div>;
 
   return (
-    <div
-      ref={parentRef}
-      style={{ height: '400px', overflow: 'auto' }}
-    >
+    <div ref={parentRef} style={{ height: '400px', overflow: 'auto' }}>
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,

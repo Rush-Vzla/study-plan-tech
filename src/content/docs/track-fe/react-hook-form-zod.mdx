@@ -88,8 +88,10 @@ shadcn/ui expone `Select`, `Checkbox`, `RadioGroup` — componentes controlados 
 `formState.errors` es un objeto tipado que tiene los errores de cada campo:
 
 ```tsx
-<Input {...register('amount')} />
-{errors.amount && <p className="text-sm text-red-600">{errors.amount.message}</p>}
+<Input {...register('amount')} />;
+{
+  errors.amount && <p className="text-sm text-red-600">{errors.amount.message}</p>;
+}
 ```
 
 TypeScript sabe que `errors.amount` puede ser `undefined` o un objeto con `message: string`. No necesitas castear nada.
@@ -176,9 +178,7 @@ export function SaleForm() {
       <div>
         <label className="text-sm font-medium">Monto</label>
         <Input type="number" step="0.01" {...register('amount')} />
-        {errors.amount && (
-          <p className="mt-1 text-sm text-red-600">{errors.amount.message}</p>
-        )}
+        {errors.amount && <p className="mt-1 text-sm text-red-600">{errors.amount.message}</p>}
       </div>
 
       <div>
@@ -198,17 +198,13 @@ export function SaleForm() {
             </Select>
           )}
         />
-        {errors.currency && (
-          <p className="mt-1 text-sm text-red-600">{errors.currency.message}</p>
-        )}
+        {errors.currency && <p className="mt-1 text-sm text-red-600">{errors.currency.message}</p>}
       </div>
 
       <div>
         <label className="text-sm font-medium">Nota (opcional)</label>
         <Input {...register('note')} placeholder="Descripción de la venta" />
-        {errors.note && (
-          <p className="mt-1 text-sm text-red-600">{errors.note.message}</p>
-        )}
+        {errors.note && <p className="mt-1 text-sm text-red-600">{errors.note.message}</p>}
       </div>
 
       <Button type="submit" loading={isSubmitting}>

@@ -1,6 +1,6 @@
 ---
-title: "OpenTelemetry y tracing"
-description: "Configura el SDK de OpenTelemetry en el backend de Rush, crea spans, exporta trazas a Tempo y entiende cuándo el tracing aporta sobre los logs."
+title: 'OpenTelemetry y tracing'
+description: 'Configura el SDK de OpenTelemetry en el backend de Rush, crea spans, exporta trazas a Tempo y entiende cuándo el tracing aporta sobre los logs.'
 sidebar:
   order: 10
 unit_type: lectura-lab-checkpoint
@@ -8,10 +8,10 @@ track: 'track-devops'
 estimated_hours: 3
 prerequisites: ['track-devops/grafana-loki-prometheus']
 learning_outcomes:
-  - "Entender qué problema resuelve el tracing distribuido que los logs no resuelven"
-  - "Inicializar el SDK de OpenTelemetry en un servicio NestJS"
-  - "Crear spans manualmente para operaciones críticas"
-  - "Exportar trazas a Tempo y visualizarlas desde Grafana"
+  - 'Entender qué problema resuelve el tracing distribuido que los logs no resuelven'
+  - 'Inicializar el SDK de OpenTelemetry en un servicio NestJS'
+  - 'Crear spans manualmente para operaciones críticas'
+  - 'Exportar trazas a Tempo y visualizarlas desde Grafana'
 tags: ['obligatorio', 'track-devops']
 last_updated: '2026-05-18'
 stack_versions: { node: '24', docker: '27' }
@@ -158,14 +158,14 @@ El span hereda el contexto del span padre (el span del request HTTP creado por l
 ### Tempo en docker-compose
 
 ```yaml
-  tempo:
-    image: grafana/tempo:2.6.1
-    restart: unless-stopped
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    volumes:
-      - ./config/tempo.yaml:/etc/tempo/tempo.yaml:ro
-    networks:
-      - rush_internal
+tempo:
+  image: grafana/tempo:2.6.1
+  restart: unless-stopped
+  command: ['-config.file=/etc/tempo/tempo.yaml']
+  volumes:
+    - ./config/tempo.yaml:/etc/tempo/tempo.yaml:ro
+  networks:
+    - rush_internal
 ```
 
 ```yaml

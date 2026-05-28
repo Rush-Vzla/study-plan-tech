@@ -135,12 +135,14 @@ import { z } from 'zod';
 
 export type Sale = z.infer<typeof saleSchema>;
 
-export const createSaleRequestSchema = saleSchema.pick({
-  amount: true,
-  currency: true,
-}).extend({
-  businessId: z.string().uuid(),
-});
+export const createSaleRequestSchema = saleSchema
+  .pick({
+    amount: true,
+    currency: true,
+  })
+  .extend({
+    businessId: z.string().uuid(),
+  });
 
 export type CreateSaleRequest = z.infer<typeof createSaleRequestSchema>;
 ```

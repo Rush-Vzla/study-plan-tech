@@ -1,5 +1,5 @@
 ---
-title: "Track Backend — Más allá de Rush"
+title: 'Track Backend — Más allá de Rush'
 description: Cinco unidades opcionales para profundizar en patrones avanzados que van más allá del stack actual de Rush.
 sidebar:
   order: 999
@@ -28,13 +28,13 @@ Cuando ya terminaste el track core de Backend y quieres ir más fondo. No hay un
 
 ## Unidades
 
-| Unidad | Horas | Qué cubre |
-| --- | --- | --- |
-| [NestJS avanzado](nestjs-avanzado/) | ~3h | OnModuleInit, forRoot/forRootAsync, custom providers con factory |
-| [Drizzle avanzado](drizzle-avanzado/) | ~3h | WITH CTEs, window functions, batch queries, subqueries |
-| [PostgreSQL avanzado](postgresql-avanzado/) | ~3h | JSONB queries, GIN indexes, pg_stat_statements, VACUUM ANALYZE |
-| [Event Sourcing completo](event-sourcing-completo/) | ~4h | Proyecciones, snapshots de aggregate, cuándo sí usar ES completo |
-| [CQRS pattern](cqrs-pattern/) | ~3h | Command/Query separation, read models separados, cuándo aplica |
+| Unidad                                              | Horas | Qué cubre                                                        |
+| --------------------------------------------------- | ----- | ---------------------------------------------------------------- |
+| [NestJS avanzado](nestjs-avanzado/)                 | ~3h   | OnModuleInit, forRoot/forRootAsync, custom providers con factory |
+| [Drizzle avanzado](drizzle-avanzado/)               | ~3h   | WITH CTEs, window functions, batch queries, subqueries           |
+| [PostgreSQL avanzado](postgresql-avanzado/)         | ~3h   | JSONB queries, GIN indexes, pg_stat_statements, VACUUM ANALYZE   |
+| [Event Sourcing completo](event-sourcing-completo/) | ~4h   | Proyecciones, snapshots de aggregate, cuándo sí usar ES completo |
+| [CQRS pattern](cqrs-pattern/)                       | ~3h   | Command/Query separation, read models separados, cuándo aplica   |
 
 Total estimado: ~16 horas.
 

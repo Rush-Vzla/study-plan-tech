@@ -1,5 +1,5 @@
 ---
-title: "Append-only: el historial que no miente"
+title: 'Append-only: el historial que no miente'
 description: Tablas de eventos que nunca se borran ni modifican — cómo Rush usa append-only para mantener un historial confiable de ventas, costos e inventario.
 sidebar:
   order: 7
@@ -15,11 +15,11 @@ learning_outcomes:
   - Diseñar tablas de eventos append-only con el schema correcto
   - Calcular el estado actual sumando eventos en vez de leer una columna mutable
   - Implementar el patrón en Drizzle con NestJS
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  drizzle: "0.x"
-  postgres: "17"
+  node: '24 LTS'
+  drizzle: '0.x'
+  postgres: '17'
 lab_runnable: false
 extra: false
 ---
@@ -224,11 +224,7 @@ export class SalesController {
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
-    return this.salesService.getTotalByPeriod(
-      businessId,
-      new Date(from),
-      new Date(to),
-    );
+    return this.salesService.getTotalByPeriod(businessId, new Date(from), new Date(to));
   }
 }
 ```

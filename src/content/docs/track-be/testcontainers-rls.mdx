@@ -1,5 +1,5 @@
 ---
-title: "Testear RLS con Postgres real"
+title: 'Testear RLS con Postgres real'
 description: Suite obligatoria con Testcontainers para verificar que la política RLS funciona — el test que demuestra que Tenant A no puede ver datos de Tenant B.
 sidebar:
   order: 6
@@ -15,10 +15,10 @@ learning_outcomes:
   - Escribir tests que verifican el aislamiento de RLS entre tenants
   - Entender por qué los mocks de base de datos no sirven para testear RLS
   - Estructurar la suite de tests obligatorios de multi-tenancy
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  postgres: "17"
+  node: '24 LTS'
+  postgres: '17'
 lab_runnable: false
 extra: false
 ---
@@ -84,10 +84,8 @@ describe('RLS tenant isolation', () => {
   });
 
   it('Tenant A cannot read Tenant B data', async () => {
-    const [bizA] = await db.insert(schema.businesses)
-      .values({ name: 'Business A' }).returning();
-    const [bizB] = await db.insert(schema.businesses)
-      .values({ name: 'Business B' }).returning();
+    const [bizA] = await db.insert(schema.businesses).values({ name: 'Business A' }).returning();
+    const [bizB] = await db.insert(schema.businesses).values({ name: 'Business B' }).returning();
 
     await db.insert(schema.salesEvents).values([
       { businessId: bizA.id, amount: '100', currency: 'USD' },
@@ -213,9 +211,7 @@ describe('RLS tenant isolation', () => {
       { businessId: bizB.id, amount: '200', currency: 'USD' },
     ]);
 
-    const result = await withTenant(pool, bizA.id, (tx) =>
-      tx.select().from(schema.salesEvents),
-    );
+    const result = await withTenant(pool, bizA.id, (tx) => tx.select().from(schema.salesEvents));
 
     expect(result).toHaveLength(1);
     expect(result[0].businessId).toBe(bizA.id);
@@ -223,7 +219,9 @@ describe('RLS tenant isolation', () => {
 
   it('Without tenant context, no rows are visible', async () => {
     const [biz] = await db.insert(schema.businesses).values({ name: 'A' }).returning();
-    await db.insert(schema.salesEvents).values({ businessId: biz.id, amount: '100', currency: 'USD' });
+    await db
+      .insert(schema.salesEvents)
+      .values({ businessId: biz.id, amount: '100', currency: 'USD' });
 
     const client = await pool.connect();
     const res = await client.query('SELECT * FROM sales_events');
@@ -235,11 +233,11 @@ describe('RLS tenant isolation', () => {
   it('Tenant A cannot read Tenant B data', async () => {
     const [bizA] = await db.insert(schema.businesses).values({ name: 'A' }).returning();
     const [bizB] = await db.insert(schema.businesses).values({ name: 'B' }).returning();
-    await db.insert(schema.salesEvents).values({ businessId: bizB.id, amount: '200', currency: 'USD' });
+    await db
+      .insert(schema.salesEvents)
+      .values({ businessId: bizB.id, amount: '200', currency: 'USD' });
 
-    const result = await withTenant(pool, bizA.id, (tx) =>
-      tx.select().from(schema.salesEvents),
-    );
+    const result = await withTenant(pool, bizA.id, (tx) => tx.select().from(schema.salesEvents));
 
     expect(result).toHaveLength(0);
   });

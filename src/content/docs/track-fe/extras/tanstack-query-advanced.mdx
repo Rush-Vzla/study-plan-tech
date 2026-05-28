@@ -1,5 +1,5 @@
 ---
-title: "TanStack Query avanzado: optimistic updates y offline"
+title: 'TanStack Query avanzado: optimistic updates y offline'
 description: Optimistic updates, placeholderData y offline strategies — los patrones de TanStack Query que hacen que la UI se sienta instantánea incluso cuando la red es lenta o no está.
 sidebar:
   order: 102
@@ -15,10 +15,10 @@ prerequisites:
   - track-fe/tanstack-query-fundamentos
   - track-fe/tanstack-query-tenant-aware
 learning_outcomes:
-  - "Implementar optimistic updates con rollback automático cuando el servidor falla"
-  - "Usar placeholderData para mostrar contenido relevante mientras llega la data real"
-  - "Configurar comportamiento offline con networkMode y persistQueryClient"
-  - "Decidir cuándo optimistic updates agrega valor real vs cuándo complica sin necesidad"
+  - 'Implementar optimistic updates con rollback automático cuando el servidor falla'
+  - 'Usar placeholderData para mostrar contenido relevante mientras llega la data real'
+  - 'Configurar comportamiento offline con networkMode y persistQueryClient'
+  - 'Decidir cuándo optimistic updates agrega valor real vs cuándo complica sin necesidad'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -72,8 +72,9 @@ export function useUpdateSaleStatus(tenantId: string) {
       const previousSales = queryClient.getQueryData<Sale[]>(['tenant', tenantId, 'sales']);
 
       // 3. Aplica el cambio optimísticamente
-      queryClient.setQueryData<Sale[]>(['tenant', tenantId, 'sales'], (old) =>
-        old?.map((sale) => (sale.id === saleId ? { ...sale, status } : sale)) ?? [],
+      queryClient.setQueryData<Sale[]>(
+        ['tenant', tenantId, 'sales'],
+        (old) => old?.map((sale) => (sale.id === saleId ? { ...sale, status } : sale)) ?? [],
       );
 
       // 4. Retorna el contexto de rollback
@@ -114,8 +115,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 export function useSalesPaginated(tenantId: string, page: number, pageSize: number) {
   return useQuery({
     queryKey: ['tenant', tenantId, 'sales', 'paginated', page, pageSize],
-    queryFn: () =>
-      fetch(`/api/sales?page=${page}&pageSize=${pageSize}`).then((res) => res.json()),
+    queryFn: () => fetch(`/api/sales?page=${page}&pageSize=${pageSize}`).then((res) => res.json()),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -285,8 +285,9 @@ export function useToggleSaleStatus(tenantId: string) {
       await queryClient.cancelQueries({ queryKey });
       const previousSales = queryClient.getQueryData<Sale[]>(queryKey);
 
-      queryClient.setQueryData<Sale[]>(queryKey, (old) =>
-        old?.map((s) => (s.id === saleId ? { ...s, status } : s)) ?? [],
+      queryClient.setQueryData<Sale[]>(
+        queryKey,
+        (old) => old?.map((s) => (s.id === saleId ? { ...s, status } : s)) ?? [],
       );
 
       return { previousSales };
@@ -336,7 +337,9 @@ export function SalesList() {
       {sales?.map((sale) => (
         <li key={sale.id} className="flex gap-4 items-center py-2">
           <span>{sale.id}</span>
-          <span>${sale.amount} {sale.currency}</span>
+          <span>
+            ${sale.amount} {sale.currency}
+          </span>
           <span className="font-mono text-sm">{sale.status}</span>
           <button
             onClick={() => toggleStatus({ saleId: sale.id, status: NEXT_STATUS[sale.status] })}
