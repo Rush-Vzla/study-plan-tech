@@ -1,5 +1,5 @@
 ---
-title: "Track Frontend — Más allá de Rush"
+title: 'Track Frontend — Más allá de Rush'
 description: Cuatro unidades opcionales para profundizar en patrones avanzados de React y arquitectura frontend que van más allá del stack actual de Rush.
 sidebar:
   order: 999
@@ -29,12 +29,12 @@ Cuando ya terminaste el track core de Frontend y quieres ir más a fondo. No hay
 
 ## Unidades
 
-| Unidad | Horas | Qué cubre |
-| --- | --- | --- |
-| [Patrones avanzados de React](react-advanced-patterns/) | ~3h | Compound components, render props, context composition |
-| [TanStack Query avanzado](tanstack-query-advanced/) | ~3h | Optimistic updates, placeholderData, offline strategies |
-| [Micro-frontends: cuándo tiene sentido](micro-frontends-intro/) | ~3h | Module Federation, cuándo escala, por qué Rush no los usa |
-| [Accesibilidad](accesibilidad-a11y/) | ~3h | ARIA roles, keyboard nav, color contrast, shadcn/ui bien usado |
+| Unidad                                                          | Horas | Qué cubre                                                      |
+| --------------------------------------------------------------- | ----- | -------------------------------------------------------------- |
+| [Patrones avanzados de React](react-advanced-patterns/)         | ~3h   | Compound components, render props, context composition         |
+| [TanStack Query avanzado](tanstack-query-advanced/)             | ~3h   | Optimistic updates, placeholderData, offline strategies        |
+| [Micro-frontends: cuándo tiene sentido](micro-frontends-intro/) | ~3h   | Module Federation, cuándo escala, por qué Rush no los usa      |
+| [Accesibilidad](accesibilidad-a11y/)                            | ~3h   | ARIA roles, keyboard nav, color contrast, shadcn/ui bien usado |
 
 Total estimado: ~12 horas.
 

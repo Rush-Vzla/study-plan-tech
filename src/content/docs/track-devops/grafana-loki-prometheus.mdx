@@ -1,6 +1,6 @@
 ---
-title: "Grafana + Loki + Prometheus"
-description: "Implementa el stack de observabilidad OSS de Rush: logs estructurados con Pino hacia Loki, métricas con prom-client hacia Prometheus, dashboards en Grafana."
+title: 'Grafana + Loki + Prometheus'
+description: 'Implementa el stack de observabilidad OSS de Rush: logs estructurados con Pino hacia Loki, métricas con prom-client hacia Prometheus, dashboards en Grafana.'
 sidebar:
   order: 9
 unit_type: lectura-lab-checkpoint
@@ -8,10 +8,10 @@ track: 'track-devops'
 estimated_hours: 5
 prerequisites: ['modulo-0/observabilidad-concepto', 'track-devops/docker-compose-droplet']
 learning_outcomes:
-  - "Distinguir logs, métricas y trazas, y saber cuándo usar cada uno"
-  - "Configurar el backend de NestJS para enviar logs JSON a Loki"
-  - "Exponer métricas de prom-client en un endpoint /metrics para Prometheus"
-  - "Crear un dashboard básico en Grafana para logs y métricas"
+  - 'Distinguir logs, métricas y trazas, y saber cuándo usar cada uno'
+  - 'Configurar el backend de NestJS para enviar logs JSON a Loki'
+  - 'Exponer métricas de prom-client en un endpoint /metrics para Prometheus'
+  - 'Crear un dashboard básico en Grafana para logs y métricas'
 tags: ['obligatorio', 'track-devops']
 last_updated: '2026-05-18'
 stack_versions: { node: '24', docker: '27' }
@@ -86,10 +86,7 @@ import { LoggerModule } from 'nestjs-pino';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-        transport:
-          process.env.NODE_ENV === 'production'
-            ? undefined
-            : { target: 'pino-pretty' },
+        transport: process.env.NODE_ENV === 'production' ? undefined : { target: 'pino-pretty' },
         redact: ['req.headers.authorization', 'body.password'],
       },
     }),
@@ -103,25 +100,25 @@ El `redact` es crítico: nunca loggees el header de autorización ni contraseña
 ### Loki y Promtail en docker-compose
 
 ```yaml
-  loki:
-    image: grafana/loki:3.3.2
-    restart: unless-stopped
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - loki_data:/loki
-      - ./config/loki.yaml:/etc/loki/local-config.yaml:ro
-    networks:
-      - rush_internal
+loki:
+  image: grafana/loki:3.3.2
+  restart: unless-stopped
+  command: -config.file=/etc/loki/local-config.yaml
+  volumes:
+    - loki_data:/loki
+    - ./config/loki.yaml:/etc/loki/local-config.yaml:ro
+  networks:
+    - rush_internal
 
-  promtail:
-    image: grafana/promtail:3.3.2
-    restart: unless-stopped
-    volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./config/promtail.yaml:/etc/promtail/config.yaml:ro
-    networks:
-      - rush_internal
+promtail:
+  image: grafana/promtail:3.3.2
+  restart: unless-stopped
+  volumes:
+    - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./config/promtail.yaml:/etc/promtail/config.yaml:ro
+  networks:
+    - rush_internal
 ```
 
 Promtail necesita acceso al socket de Docker para leer logs de los contenedores.
@@ -174,14 +171,14 @@ El endpoint `/metrics` devuelve las métricas en formato texto que Prometheus en
 ### Prometheus en docker-compose
 
 ```yaml
-  prometheus:
-    image: prom/prometheus:v3.1.0
-    restart: unless-stopped
-    volumes:
-      - prometheus_data:/prometheus
-      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
-    networks:
-      - rush_internal
+prometheus:
+  image: prom/prometheus:v3.1.0
+  restart: unless-stopped
+  volumes:
+    - prometheus_data:/prometheus
+    - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+  networks:
+    - rush_internal
 ```
 
 ```yaml
@@ -199,16 +196,16 @@ scrape_configs:
 ### Grafana con data sources preconfigurados
 
 ```yaml
-  grafana:
-    image: grafana/grafana:11.4.0
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    networks:
-      - rush_internal
+grafana:
+  image: grafana/grafana:11.4.0
+  restart: unless-stopped
+  environment:
+    GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+  volumes:
+    - grafana_data:/var/lib/grafana
+    - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+  networks:
+    - rush_internal
 ```
 
 Los data sources se pueden provisionar desde archivos YAML para que estén listos al arrancar Grafana:

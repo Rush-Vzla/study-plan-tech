@@ -10,15 +10,15 @@ tags: [obligatorio, m0]
 track: modulo-0
 unit_type: lectura-lab-checkpoint
 estimated_hours: 3
-prerequisites: ["modulo-0/clean-arch-pragmatica", "modulo-0/docker-basico"]
+prerequisites: ['modulo-0/clean-arch-pragmatica', 'modulo-0/docker-basico']
 learning_outcomes:
   - Entender por qué testear es una actividad de diseño, no de verificación
   - Escribir tests unitarios con Vitest para lógica de dominio
   - Usar Testcontainers para testear contra Postgres real en vez de mocks
   - Conocer cuándo usar E2E con Playwright y cuándo no
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 stack_versions:
-  node: "20.18.0"
+  node: '20.18.0'
 lab_runnable: false
 extra: false
 ---
@@ -242,9 +242,7 @@ describe('Money', () => {
     });
 
     it('throws on currency mismatch', () => {
-      expect(() => new Money(100, 'USD').add(new Money(100, 'VES'))).toThrow(
-        'Currency mismatch',
-      );
+      expect(() => new Money(100, 'USD').add(new Money(100, 'VES'))).toThrow('Currency mismatch');
     });
   });
 

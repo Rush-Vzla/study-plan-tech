@@ -1,5 +1,5 @@
 ---
-title: "Rate limiting jerárquico"
+title: 'Rate limiting jerárquico'
 description: Tres niveles de rate limiting con Redis — global por IP, por tenant y por usuario — para proteger el API de abuso sin afectar a tenants legítimos.
 sidebar:
   order: 20
@@ -15,10 +15,10 @@ learning_outcomes:
   - Diseñar tres niveles de límite — global, por tenant y por usuario
   - Aplicar el guard de rate limiting en los endpoints correctos
   - Devolver el header Retry-After cuando el límite se alcanza
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -121,7 +121,9 @@ Cuando el límite se alcanza, el API debe incluir el header `Retry-After` con cu
 ```ts
 if (!globalOk) {
   const ttl = await this.redis.ttl(`rl:global:${req.ip}:${now}`);
-  const response = context.switchToHttp().getResponse<{ setHeader: (key: string, value: string) => void }>();
+  const response = context
+    .switchToHttp()
+    .getResponse<{ setHeader: (key: string, value: string) => void }>();
   response.setHeader('Retry-After', String(ttl));
   throw new TooManyRequestsException('Global rate limit exceeded');
 }

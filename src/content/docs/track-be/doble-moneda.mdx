@@ -1,5 +1,5 @@
 ---
-title: "Doble moneda: VES + USD en Rush"
+title: 'Doble moneda: VES + USD en Rush'
 description: La 4-tupla (amount, currency, usd_equivalent, reference_rate) para manejar montos en bolívares y dólares sin hardcodear ninguna tasa de cambio.
 sidebar:
   order: 10
@@ -15,11 +15,11 @@ learning_outcomes:
   - Implementar la 4-tupla en el schema de Drizzle
   - Diseñar la tabla exchange_rates para auditoría de tasas
   - Calcular equivalentes en USD sin queries a APIs externas en tiempo real
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  drizzle: "0.x"
-  postgres: "17"
+  node: '24 LTS'
+  drizzle: '0.x'
+  postgres: '17'
 lab_runnable: false
 extra: false
 ---
@@ -37,12 +37,12 @@ El problema técnico: la tasa de cambio varía todos los días. Si guardas solo 
 
 La solución de Rush es guardar cuatro valores por cada monto monetario:
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `amount` | NUMERIC(19,4) | El monto en la moneda original de la transacción |
-| `currency` | TEXT | La moneda del monto ('VES' o 'USD') |
+| Campo            | Tipo          | Descripción                                        |
+| ---------------- | ------------- | -------------------------------------------------- |
+| `amount`         | NUMERIC(19,4) | El monto en la moneda original de la transacción   |
+| `currency`       | TEXT          | La moneda del monto ('VES' o 'USD')                |
 | `usd_equivalent` | NUMERIC(19,4) | El equivalente en USD al momento de la transacción |
-| `reference_rate` | NUMERIC(19,6) | La tasa VES/USD usada para el cálculo |
+| `reference_rate` | NUMERIC(19,6) | La tasa VES/USD usada para el cálculo              |
 
 Fíjate que guardar `reference_rate` es lo que permite auditoría: puedes verificar exactamente con qué tasa se convirtió ese monto, sin depender de una fuente externa.
 

@@ -1,5 +1,5 @@
 ---
-title: "SDD: cómo Rush decide antes de codear"
+title: 'SDD: cómo Rush decide antes de codear'
 description: El pipeline explore-propose-spec-tasks-apply-verify — el humano dirige, la IA ejecuta.
 sidebar:
   order: 9
@@ -16,7 +16,7 @@ learning_outcomes:
   - Saber qué decisiones toma el humano y qué ejecuta la IA
   - Leer y entender artefactos SDD (spec, design, tasks)
   - Aplicar SDD para planificar un cambio pequeño
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 lab_runnable: false
 extra: false
 ---
@@ -92,10 +92,11 @@ Fíjate que la IA nunca toma decisiones de diseño por sí sola. Si hay ambigüe
 El spec es el contrato entre el humano y el proceso de implementación. Si el spec es vago, el apply produce código que no coincide con lo que el founder tenía en mente. Si el spec es preciso, el verify puede comparar el código contra criterios concretos.
 
 Un spec malo:
+
 > "Agregar autenticación al sistema"
 
 Un spec bien formado:
->
+
 > - REQ-01: El endpoint `POST /auth/login` acepta `{email, password}` y retorna `{accessToken, refreshToken, expiresIn}`
 > - REQ-02: Si el email no existe, retorna 401 con `{code: 'INVALID_CREDENTIALS'}`
 > - REQ-03: Si el password es incorrecto, retorna 401 con `{code: 'INVALID_CREDENTIALS'}` (mismo error — no revela si el email existe)
@@ -123,11 +124,13 @@ Escribe el explore tú mismo — sin la IA:
 Pregunta: ¿cómo calculamos el total de ventas del día para un business?
 
 Contexto del repo:
+
 - Tabla `sales_events` con columnas: id, business_id, amount, currency, created_at (TIMESTAMPTZ)
 - El endpoint de sales existe en `src/sales/sales.controller.ts`
 - No existe ningún endpoint de "resumen" o "totales"
 
 Opciones:
+
 1. Query directa a la tabla con SUM y WHERE created_at >= hoy
 2. KPI snapshot pre-calculado (más complejo, para futuro)
 

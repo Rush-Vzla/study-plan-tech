@@ -1,5 +1,5 @@
 ---
-title: "NestJS avanzado: lifecycle, providers y módulos dinámicos"
+title: 'NestJS avanzado: lifecycle, providers y módulos dinámicos'
 description: OnModuleInit, forRoot/forRootAsync, y custom providers con factory — los patrones que separan el uso básico del uso experto de NestJS.
 sidebar:
   order: 101
@@ -15,10 +15,10 @@ prerequisites:
   - track-be/nestjs-fundamentos
   - track-be/nestjs-guards-pipes
 learning_outcomes:
-  - "Usar OnModuleInit para ejecutar lógica de inicialización de forma predecible"
-  - "Crear módulos dinámicos con forRoot y forRootAsync para configuración en runtime"
-  - "Implementar custom providers con useFactory para inyectar dependencias complejas"
-  - "Entender cuándo un custom provider resuelve problemas que un provider simple no puede"
+  - 'Usar OnModuleInit para ejecutar lógica de inicialización de forma predecible'
+  - 'Crear módulos dinámicos con forRoot y forRootAsync para configuración en runtime'
+  - 'Implementar custom providers con useFactory para inyectar dependencias complejas'
+  - 'Entender cuándo un custom provider resuelve problemas que un provider simple no puede'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -268,10 +268,7 @@ export class RedisModule {
   static forRoot(options: RedisModuleOptions): DynamicModule {
     return {
       module: RedisModule,
-      providers: [
-        { provide: 'REDIS_OPTIONS', useValue: options },
-        RedisService,
-      ],
+      providers: [{ provide: 'REDIS_OPTIONS', useValue: options }, RedisService],
       exports: [RedisService],
       global: true,
     };

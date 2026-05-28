@@ -1,5 +1,5 @@
 ---
-title: "Módulos como capacidades del Business OS"
+title: 'Módulos como capacidades del Business OS'
 description: Organizar NestJS con módulos que representan capacidades del negocio — onboarding, sales, health-score — no CRUD genérico. Con eslint-plugin-boundaries para prevenir dependencias cruzadas.
 sidebar:
   order: 16
@@ -14,12 +14,12 @@ prerequisites:
 learning_outcomes:
   - Organizar el backend de Rush por capacidades de negocio, no por tipo técnico
   - Usar eslint-plugin-boundaries para prevenir dependencias incorrectas entre módulos
-  - "Aplicar la regla de dependencias: infrastructure apunta hacia domain, nunca al revés"
+  - 'Aplicar la regla de dependencias: infrastructure apunta hacia domain, nunca al revés'
   - Identificar qué pertenece a cada capa dentro de un módulo
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -82,14 +82,17 @@ Esta librería te permite definir reglas de qué módulo puede importar de qué 
 module.exports = {
   plugins: ['boundaries'],
   rules: {
-    'boundaries/element-types': ['error', {
-      default: 'disallow',
-      rules: [
-        { from: 'controller', allow: ['service'] },
-        { from: 'service', allow: ['domain', 'repository'] },
-        { from: 'repository', allow: ['domain'] },
-      ],
-    }],
+    'boundaries/element-types': [
+      'error',
+      {
+        default: 'disallow',
+        rules: [
+          { from: 'controller', allow: ['service'] },
+          { from: 'service', allow: ['domain', 'repository'] },
+          { from: 'repository', allow: ['domain'] },
+        ],
+      },
+    ],
   },
 };
 ```
@@ -98,12 +101,12 @@ Si un `sales.service.ts` intenta importar directamente del `drizzle.service.ts` 
 
 ### ¿Qué no va en cada capa?
 
-| Capa | Tiene | No tiene |
-|------|-------|----------|
-| Controller | Routing, validación de input | Lógica de negocio |
-| Service | Use cases, reglas de negocio | SQL, frameworks externos |
-| Domain | Tipos, errores, value objects | Frameworks, IO |
-| Repository | Queries SQL | Lógica de negocio |
+| Capa       | Tiene                         | No tiene                 |
+| ---------- | ----------------------------- | ------------------------ |
+| Controller | Routing, validación de input  | Lógica de negocio        |
+| Service    | Use cases, reglas de negocio  | SQL, frameworks externos |
+| Domain     | Tipos, errores, value objects | Frameworks, IO           |
+| Repository | Queries SQL                   | Lógica de negocio        |
 
 Si el service tiene un `db.select().from(...)` directo, algo está mal — eso debería estar en el repositorio.
 

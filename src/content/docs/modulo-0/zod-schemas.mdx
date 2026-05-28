@@ -1,5 +1,5 @@
 ---
-title: "Zod: validación que no miente"
+title: 'Zod: validación que no miente'
 description: Schemas, parse vs safeParse, composición e inferencia de tipos — una sola fuente de verdad.
 sidebar:
   order: 6
@@ -10,15 +10,15 @@ tags: [obligatorio, m0]
 track: modulo-0
 unit_type: lectura-lab-checkpoint
 estimated_hours: 2
-prerequisites: ["modulo-0/ts-estricto"]
+prerequisites: ['modulo-0/ts-estricto']
 learning_outcomes:
   - Definir schemas Zod para validar datos en runtime
   - Entender la diferencia entre parse y safeParse y cuándo usar cada uno
   - Componer schemas para reutilizar validaciones
   - Inferir tipos TypeScript desde schemas sin duplicar definiciones
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 stack_versions:
-  typescript: "6.0.3"
+  typescript: '6.0.3'
 lab_runnable: false
 extra: false
 ---
@@ -75,32 +75,32 @@ Regla en Rush:
 
 ```ts
 // Strings
-z.string()                    // cualquier string
-z.string().min(1)             // no vacío
-z.string().max(255)           // máximo 255 chars
-z.string().email()            // email válido
-z.string().uuid()             // UUID válido
-z.string().url()              // URL válida
-z.string().regex(/^\d{7,8}$/) // RIF venezolano (solo el número)
+z.string(); // cualquier string
+z.string().min(1); // no vacío
+z.string().max(255); // máximo 255 chars
+z.string().email(); // email válido
+z.string().uuid(); // UUID válido
+z.string().url(); // URL válida
+z.string().regex(/^\d{7,8}$/); // RIF venezolano (solo el número)
 
 // Números
-z.number()                    // cualquier número
-z.number().int()              // entero
-z.number().positive()         // > 0
-z.number().min(0).max(100)    // rango
+z.number(); // cualquier número
+z.number().int(); // entero
+z.number().positive(); // > 0
+z.number().min(0).max(100); // rango
 
 // Enums y literales
-z.enum(['USD', 'VES'])
-z.literal('active')
+z.enum(['USD', 'VES']);
+z.literal('active');
 
 // Arrays y objetos
-z.array(z.string())
-z.object({ name: z.string() })
+z.array(z.string());
+z.object({ name: z.string() });
 
 // Opcionales y defaults
-z.string().optional()         // string | undefined
-z.string().nullable()         // string | null
-z.string().default('pending') // valor por defecto
+z.string().optional(); // string | undefined
+z.string().nullable(); // string | null
+z.string().default('pending'); // valor por defecto
 ```
 
 ### Composición — reutilizar schemas
@@ -194,9 +194,9 @@ import { CreateTransactionSchema } from './schemas.js';
 const validInput = {
   businessId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   money: {
-    amount: 150.00,
+    amount: 150.0,
     currency: 'USD',
-    usdEquivalent: 150.00,
+    usdEquivalent: 150.0,
     referenceRate: 1.0,
   },
   description: 'Venta de inventario',

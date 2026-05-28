@@ -1,5 +1,5 @@
 ---
-title: "Guards, pipes e interceptors"
+title: 'Guards, pipes e interceptors'
 description: Cómo validar autenticación, transformar el body y loggear requests en NestJS con guards, pipes de Zod e interceptors.
 sidebar:
   order: 2
@@ -15,10 +15,10 @@ learning_outcomes:
   - Validar el body de los requests con pipes de Zod
   - Loggear requests y responses con interceptors
   - Entender el orden de ejecución del middleware en NestJS
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  nestjs: "11.x"
-  node: "24 LTS"
+  nestjs: '11.x'
+  node: '24 LTS'
 lab_runnable: false
 extra: false
 ---
@@ -186,7 +186,9 @@ import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from
 @Injectable()
 export class JwtGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<{ headers: Record<string, string>; user?: unknown }>();
+    const request = context
+      .switchToHttp()
+      .getRequest<{ headers: Record<string, string>; user?: unknown }>();
     const token = request.headers['x-test-token'];
 
     if (token !== 'valid-token') {
@@ -240,9 +242,9 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<{ method: string; url: string }>();
     const start = Date.now();
-    return next.handle().pipe(
-      tap(() => console.log(`${req.method} ${req.url} — ${Date.now() - start}ms`)),
-    );
+    return next
+      .handle()
+      .pipe(tap(() => console.log(`${req.method} ${req.url} — ${Date.now() - start}ms`)));
   }
 }
 ```

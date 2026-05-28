@@ -1,6 +1,6 @@
 ---
-title: "Track DevOps — Más allá de Rush"
-description: "Tres unidades opcionales para ir más allá del stack que Rush usa hoy: Kubernetes, Terraform e GitHub Actions avanzado."
+title: 'Track DevOps — Más allá de Rush'
+description: 'Tres unidades opcionales para ir más allá del stack que Rush usa hoy: Kubernetes, Terraform e GitHub Actions avanzado.'
 sidebar:
   order: 999
   badge:
@@ -11,8 +11,8 @@ track: 'track-devops'
 estimated_hours: 10
 prerequisites: ['track-devops/droplet-single-node-deploy']
 learning_outcomes:
-  - "Conocer las herramientas de infraestructura más allá del stack actual de Rush"
-  - "Saber cuándo tiene sentido adoptarlas y cuándo no"
+  - 'Conocer las herramientas de infraestructura más allá del stack actual de Rush'
+  - 'Saber cuándo tiene sentido adoptarlas y cuándo no'
 tags: ['extra', 'track-devops']
 last_updated: '2026-05-18'
 stack_versions: {}
@@ -38,11 +38,11 @@ Cuando hayas terminado las 14 unidades del Track DevOps core y entiendas cómo f
 
 ## Qué cubre cada unidad
 
-| Unidad | Tema | Horas |
-| ------ | ---- | ----- |
-| [Kubernetes: cuándo el Droplet no alcanza](./kubernetes-intro/) | Pods, Services, Deployments. Rush no lo usa — por qué. | ~4 hs |
-| [Terraform: infraestructura como código](./terraform-iac/) | Recursos DigitalOcean con Terraform. Cuándo conviene vs. scripts. | ~3 hs |
-| [GitHub Actions avanzado](./github-actions-avanzado/) | Matrix strategy, cache de dependencias, reusable workflows. | ~3 hs |
+| Unidad                                                          | Tema                                                              | Horas |
+| --------------------------------------------------------------- | ----------------------------------------------------------------- | ----- |
+| [Kubernetes: cuándo el Droplet no alcanza](./kubernetes-intro/) | Pods, Services, Deployments. Rush no lo usa — por qué.            | ~4 hs |
+| [Terraform: infraestructura como código](./terraform-iac/)      | Recursos DigitalOcean con Terraform. Cuándo conviene vs. scripts. | ~3 hs |
+| [GitHub Actions avanzado](./github-actions-avanzado/)           | Matrix strategy, cache de dependencias, reusable workflows.       | ~3 hs |
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-title: "Validación Zod en dos capas"
+title: 'Validación Zod en dos capas'
 description: Por qué validar en el borde HTTP Y en cada use case — una sola capa no es suficiente para garantizar la integridad de los datos en un sistema multi-tenant.
 sidebar:
   order: 21
@@ -15,10 +15,10 @@ learning_outcomes:
   - Implementar schemas Zod compartidos entre la capa HTTP y la capa de use case
   - Reutilizar schemas del paquete shared-schemas
   - Identificar qué validaciones van en qué capa
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -97,12 +97,12 @@ Si un job de BullMQ llama al service con datos incorrectos, el `parse` lanza un 
 
 ### Qué validaciones van en qué capa
 
-| Tipo de validación | Capa HTTP | Capa use case |
-|---|---|---|
-| Formato del request (tipos, shape) | ✓ | — |
-| Reglas de negocio (límites, invariantes) | — | ✓ |
-| Existencia de entidades referenciadas | — | ✓ |
-| Permisos sobre el tenant | — | ✓ |
+| Tipo de validación                       | Capa HTTP | Capa use case |
+| ---------------------------------------- | --------- | ------------- |
+| Formato del request (tipos, shape)       | ✓         | —             |
+| Reglas de negocio (límites, invariantes) | —         | ✓             |
+| Existencia de entidades referenciadas    | —         | ✓             |
+| Permisos sobre el tenant                 | —         | ✓             |
 
 ## 2. Lab guiado
 

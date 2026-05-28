@@ -1,5 +1,5 @@
 ---
-title: "PostgreSQL avanzado: JSONB, GIN indexes y mantenimiento"
+title: 'PostgreSQL avanzado: JSONB, GIN indexes y mantenimiento'
 description: JSONB queries, GIN indexes, pg_stat_statements para identificar queries lentas, y VACUUM ANALYZE para que la base de datos no se degrade con el tiempo.
 sidebar:
   order: 103
@@ -16,10 +16,10 @@ prerequisites:
   - track-be/drizzle-fundamentos
   - track-be/rls-multi-tenant
 learning_outcomes:
-  - "Almacenar y consultar datos semiestructurados con JSONB de forma eficiente"
-  - "Crear GIN indexes para acelerar queries sobre campos JSONB"
-  - "Usar pg_stat_statements para identificar las queries más lentas en producción"
-  - "Entender cuándo y cómo ejecutar VACUUM ANALYZE en tablas con alta frecuencia de escritura"
+  - 'Almacenar y consultar datos semiestructurados con JSONB de forma eficiente'
+  - 'Crear GIN indexes para acelerar queries sobre campos JSONB'
+  - 'Usar pg_stat_statements para identificar las queries más lentas en producción'
+  - 'Entender cuándo y cómo ejecutar VACUUM ANALYZE en tablas con alta frecuencia de escritura'
 last_updated: '2026-05-18'
 stack_versions:
   node: '24'
@@ -78,13 +78,13 @@ SELECT * FROM audit_events
 WHERE payload ? 'discount_code';
 ```
 
-| Operador | Resultado | Uso |
-| --- | --- | --- |
-| `->` | jsonb | Extrae sub-elemento como jsonb |
-| `->>` | text | Extrae sub-elemento como texto |
-| `@>` | boolean | Contiene (containment check) |
-| `?` | boolean | Key existe |
-| `#>>` | text | Extrae path anidado como texto |
+| Operador | Resultado | Uso                            |
+| -------- | --------- | ------------------------------ |
+| `->`     | jsonb     | Extrae sub-elemento como jsonb |
+| `->>`    | text      | Extrae sub-elemento como texto |
+| `@>`     | boolean   | Contiene (containment check)   |
+| `?`      | boolean   | Key existe                     |
+| `#>>`    | text      | Extrae path anidado como texto |
 
 El operador `@>` es el que más vas a usar para filtrar. Es el que se beneficia más de un índice GIN.
 

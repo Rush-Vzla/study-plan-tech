@@ -1,17 +1,22 @@
 ---
-title: "Deploy al Droplet con rollback en 1 minuto"
-description: "Ejecuta el ciclo completo de deploy al Droplet de DigitalOcean: pull de imagen, restart de servicio, health check post-deploy y rollback si falla."
+title: 'Deploy al Droplet con rollback en 1 minuto'
+description: 'Ejecuta el ciclo completo de deploy al Droplet de DigitalOcean: pull de imagen, restart de servicio, health check post-deploy y rollback si falla.'
 sidebar:
   order: 14
 unit_type: lectura-lab-checkpoint
 track: 'track-devops'
 estimated_hours: 4
-prerequisites: ['track-devops/github-actions-pipeline', 'track-devops/caddy-reverse-proxy', 'track-devops/expand-contract-deploy']
+prerequisites:
+  [
+    'track-devops/github-actions-pipeline',
+    'track-devops/caddy-reverse-proxy',
+    'track-devops/expand-contract-deploy',
+  ]
 learning_outcomes:
-  - "Ejecutar un deploy completo al Droplet desde el pipeline de CI/CD"
-  - "Verificar la salud del servicio inmediatamente después del deploy"
-  - "Ejecutar un rollback en menos de 1 minuto si el health check falla"
-  - "Entender por qué el rollback de code es distinto al rollback de schema"
+  - 'Ejecutar un deploy completo al Droplet desde el pipeline de CI/CD'
+  - 'Verificar la salud del servicio inmediatamente después del deploy'
+  - 'Ejecutar un rollback en menos de 1 minuto si el health check falla'
+  - 'Entender por qué el rollback de code es distinto al rollback de schema'
 tags: ['obligatorio', 'track-devops']
 last_updated: '2026-05-18'
 stack_versions: { docker: '27', caddy: '2' }

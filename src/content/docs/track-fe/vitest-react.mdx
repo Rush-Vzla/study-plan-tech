@@ -184,10 +184,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 );
 
 test('carga ventas del API', async () => {
-  const { result } = renderHook(
-    () => useSales(),
-    { wrapper },
-  );
+  const { result } = renderHook(() => useSales(), { wrapper });
 
   await waitFor(() => expect(result.current.data).toBeDefined());
   expect(result.current.data).toHaveLength(1);

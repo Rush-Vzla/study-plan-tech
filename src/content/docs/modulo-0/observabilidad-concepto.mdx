@@ -1,5 +1,5 @@
 ---
-title: "Observabilidad: ver qué pasa en producción"
+title: 'Observabilidad: ver qué pasa en producción'
 description: Logs estructurados Pino hacia Loki, métricas Prometheus, dashboards Grafana — conceptos sin setup completo.
 sidebar:
   order: 11
@@ -16,7 +16,7 @@ learning_outcomes:
   - Escribir logs estructurados con Pino en el formato correcto para Rush
   - Saber qué métricas usa Prometheus y qué dashboards en Grafana
   - Distinguir cuándo usar logs vs métricas vs trazas para un problema dado
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 lab_runnable: false
 extra: false
 ---
@@ -65,12 +65,15 @@ Un log estructurado en JSON es la base:
 console.log('Error al procesar venta de negocio ' + businessId);
 
 // SÍ — JSON estructurado con contexto
-logger.error({
-  event: 'sale.create.failed',
-  businessId,
-  errorCode: 'INSUFFICIENT_FUNDS',
-  requestId,
-}, 'Sale creation failed');
+logger.error(
+  {
+    event: 'sale.create.failed',
+    businessId,
+    errorCode: 'INSUFFICIENT_FUNDS',
+    requestId,
+  },
+  'Sale creation failed',
+);
 ```
 
 El log estructurado se puede enviar a Loki (la base de datos de logs de Grafana) y hacer queries como:
@@ -89,13 +92,16 @@ logger.info({ payload: requestBody }, 'Processing payment');
 // Si requestBody tiene el amount, el RIF, datos del dueño → fuga
 
 // BIEN — solo los campos necesarios para debug
-logger.info({
-  event: 'payment.processing',
-  businessId: payload.businessId,
-  idempotencyKey: payload.idempotencyKey,
-  currency: payload.currency,
-  // NO el amount, NO el RIF, NO información personal
-}, 'Processing payment');
+logger.info(
+  {
+    event: 'payment.processing',
+    businessId: payload.businessId,
+    idempotencyKey: payload.idempotencyKey,
+    currency: payload.currency,
+    // NO el amount, NO el RIF, NO información personal
+  },
+  'Processing payment',
+);
 ```
 
 Los campos prohibidos en logs de Rush:

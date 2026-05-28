@@ -1,5 +1,5 @@
 ---
-title: "Boundaries contract-only: billing, coach, fiscal"
+title: 'Boundaries contract-only: billing, coach, fiscal'
 description: Interfaz + NoOp adapter para capacidades futuras de Rush — billing, coach y módulo fiscal. El dominio no cambia cuando se activa la capacidad real.
 sidebar:
   order: 17
@@ -15,10 +15,10 @@ learning_outcomes:
   - Implementar un NoOp adapter que cumple el contrato sin hacer nada
   - Activar la capacidad real implementando un adapter real
   - Entender por qué el dominio no debe saber si la capacidad está activa o no
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -128,11 +128,11 @@ El `SalesService` no sabe si el billing es real o NoOp. Llama al contrato.
 
 ### Los tres boundaries de Rush
 
-| Capacidad | Estado | Adapter actual |
-|-----------|--------|----------------|
+| Capacidad                         | Estado      | Adapter actual       |
+| --------------------------------- | ----------- | -------------------- |
 | Billing (facturación electrónica) | Planificado | `NoOpBillingAdapter` |
-| Coach IA | Planificado | `NoOpCoachAdapter` |
-| Módulo fiscal (SENIAT) | Planificado | `NoOpFiscalAdapter` |
+| Coach IA                          | Planificado | `NoOpCoachAdapter`   |
+| Módulo fiscal (SENIAT)            | Planificado | `NoOpFiscalAdapter`  |
 
 ## 2. Lab guiado
 

@@ -1,5 +1,5 @@
 ---
-title: "Better Auth: auth multi-tenant sin cookieCache"
+title: 'Better Auth: auth multi-tenant sin cookieCache'
 description: Los 5 flujos de autenticación de Rush con Better Auth — registro, login recurrente, invitación de empleado, recovery de contraseña y step-up. Con cookieCache desactivado por CVE.
 sidebar:
   order: 11
@@ -15,10 +15,10 @@ learning_outcomes:
   - Implementar los 5 flujos de autenticación de Rush
   - Desactivar cookieCache por razones de seguridad (CVE)
   - Proteger endpoints con el guard JWT de Better Auth
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  nestjs: "11.x"
+  node: '24 LTS'
+  nestjs: '11.x'
 lab_runnable: false
 extra: false
 ---
@@ -41,7 +41,9 @@ En un sistema financiero donde un empleado puede ser desactivado por el dueño d
 import { betterAuth } from 'better-auth';
 
 export const auth = betterAuth({
-  database: { /* drizzle config */ },
+  database: {
+    /* drizzle config */
+  },
   session: {
     cookieCache: {
       enabled: false,

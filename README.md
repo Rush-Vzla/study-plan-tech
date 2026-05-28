@@ -12,12 +12,12 @@ Devs que se suman al equipo Rush y necesitan agarrar el contexto técnico antes 
 
 80 unidades organizadas en 4 grupos. Tiempo estimado total: ~165 horas.
 
-| Grupo | Unidades | Horas est. |
-| ----- | -------- | ----------- |
-| Módulo 0 — Fundaciones (obligatorio) | 12 | ~28 h |
-| Track Backend (core + extras) | 23 + 5 = 28 | ~77 h |
-| Track Frontend (core + extras) | 19 + 4 = 23 | ~63 h |
-| Track DevOps (core + extras) | 14 + 3 = 17 | ~53 h |
+| Grupo                                | Unidades    | Horas est. |
+| ------------------------------------ | ----------- | ---------- |
+| Módulo 0 — Fundaciones (obligatorio) | 12          | ~28 h      |
+| Track Backend (core + extras)        | 23 + 5 = 28 | ~77 h      |
+| Track Frontend (core + extras)       | 19 + 4 = 23 | ~63 h      |
+| Track DevOps (core + extras)         | 14 + 3 = 17 | ~53 h      |
 
 ## Cómo correrlo local
 
@@ -55,15 +55,15 @@ src/content/docs/
 
 ## Stack del docs site
 
-| Paquete    | Version  |
-| ---------- | -------- |
-| Node       | 24 LTS   |
-| pnpm       | 11+      |
-| Astro      | 6.3.x    |
-| Starlight  | 0.39.x   |
+| Paquete    | Version                     |
+| ---------- | --------------------------- |
+| Node       | 24 LTS                      |
+| pnpm       | 11+                         |
+| Astro      | 6.3.x                       |
+| Starlight  | 0.39.x                      |
 | Tailwind   | 4.x (via @tailwindcss/vite) |
-| TypeScript | 6.x      |
-| Zod        | 4.x      |
+| TypeScript | 6.x                         |
+| Zod        | 4.x                         |
 
 ## Stack del plan de estudios
 

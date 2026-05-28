@@ -1,5 +1,5 @@
 ---
-title: "KPI snapshots: escalar el cálculo de métricas"
+title: 'KPI snapshots: escalar el cálculo de métricas'
 description: Materialización diaria de KPIs en kpi_snapshots con kpi_formula_versions — cómo Rush pre-calcula tendencias para que el dashboard cargue rápido sin matar la base de datos.
 sidebar:
   order: 19
@@ -15,11 +15,11 @@ learning_outcomes:
   - Diseñar la tabla kpi_snapshots para materialización diaria
   - Implementar el job de cálculo con BullMQ
   - Usar kpi_formula_versions para rastrear cambios de fórmulas
-last_updated: "2026-05-18"
+last_updated: '2026-05-18'
 stack_versions:
-  node: "24 LTS"
-  drizzle: "0.x"
-  postgres: "17"
+  node: '24 LTS'
+  drizzle: '0.x'
+  postgres: '17'
 lab_runnable: false
 extra: false
 ---
@@ -54,7 +54,12 @@ export const kpiSnapshots = pgTable(
     calculatedAt: timestamp('calculated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    unique('kpi_snapshots_unique').on(table.businessId, table.kpiKey, table.snapshotDate, table.period),
+    unique('kpi_snapshots_unique').on(
+      table.businessId,
+      table.kpiKey,
+      table.snapshotDate,
+      table.period,
+    ),
   ],
 );
 ```
@@ -112,7 +117,12 @@ export class KpiSnapshotJob {
         formulaVersion: 'v1',
       })
       .onConflictDoUpdate({
-        target: [kpiSnapshots.businessId, kpiSnapshots.kpiKey, kpiSnapshots.snapshotDate, kpiSnapshots.period],
+        target: [
+          kpiSnapshots.businessId,
+          kpiSnapshots.kpiKey,
+          kpiSnapshots.snapshotDate,
+          kpiSnapshots.period,
+        ],
         set: { value: result.total, calculatedAt: new Date() },
       });
   }

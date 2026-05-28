@@ -14,7 +14,7 @@ prerequisites: []
 learning_outcomes:
   - Entender las herramientas base del stack Rush
   - Completar el módulo antes de elegir un track especializado
-last_updated: "2026-05-17"
+last_updated: '2026-05-17'
 lab_runnable: false
 extra: false
 ---
@@ -31,30 +31,30 @@ Doce unidades organizadas en tres bloques:
 
 ### Herramientas base
 
-| Unidad | Qué aprendes | Tiempo |
-| ------ | ------------ | ------ |
-| [TypeScript sin trampa](./ts-estricto/) | strict mode, genéricos, Zod inference | ~3 hs |
-| [SQL de verdad](./sql-real/) | JOINs, índices, EXPLAIN ANALYZE, Postgres real | ~3 hs |
-| [Git como herramienta de equipo](./git-workflow/) | feature branches, squash merge, PRs limpios | ~2 hs |
-| [Docker sin miedo](./docker-basico/) | imagen, contenedor, Dockerfile, docker-compose | ~2 hs |
-| [pnpm y el workspace de Rush](./pnpm-monorepo/) | workspaces, lockfile, publicar paquetes | ~2 hs |
-| [Zod: validación que no miente](./zod-schemas/) | schemas, parse, composición, shared-schemas | ~2 hs |
+| Unidad                                            | Qué aprendes                                   | Tiempo |
+| ------------------------------------------------- | ---------------------------------------------- | ------ |
+| [TypeScript sin trampa](./ts-estricto/)           | strict mode, genéricos, Zod inference          | ~3 hs  |
+| [SQL de verdad](./sql-real/)                      | JOINs, índices, EXPLAIN ANALYZE, Postgres real | ~3 hs  |
+| [Git como herramienta de equipo](./git-workflow/) | feature branches, squash merge, PRs limpios    | ~2 hs  |
+| [Docker sin miedo](./docker-basico/)              | imagen, contenedor, Dockerfile, docker-compose | ~2 hs  |
+| [pnpm y el workspace de Rush](./pnpm-monorepo/)   | workspaces, lockfile, publicar paquetes        | ~2 hs  |
+| [Zod: validación que no miente](./zod-schemas/)   | schemas, parse, composición, shared-schemas    | ~2 hs  |
 
 ### Arquitectura y diseño
 
-| Unidad | Qué aprendes | Tiempo |
-| ------ | ------------ | ------ |
-| [Clean Architecture sin ceremonias](./clean-arch-pragmatica/) | capas, dependencias hacia adentro | ~3 hs |
-| [Screaming Architecture](./vertical-slices/) | módulos por dominio, no por tipo técnico | ~2 hs |
+| Unidad                                                        | Qué aprendes                             | Tiempo |
+| ------------------------------------------------------------- | ---------------------------------------- | ------ |
+| [Clean Architecture sin ceremonias](./clean-arch-pragmatica/) | capas, dependencias hacia adentro        | ~3 hs  |
+| [Screaming Architecture](./vertical-slices/)                  | módulos por dominio, no por tipo técnico | ~2 hs  |
 
 ### Flujo de trabajo en Rush
 
-| Unidad | Qué aprendes | Tiempo |
-| ------ | ------------ | ------ |
-| [SDD: cómo Rush decide antes de codear](./sdd-flujo/) | pipeline SDD, humano dirige, IA ejecuta | ~2 hs |
-| [Claude Code y Engram como herramientas](./ai-tooling/) | Claude en terminal, Engram como memoria | ~2 hs |
-| [Observabilidad: ver qué pasa en producción](./observabilidad-concepto/) | logs Pino, métricas Prometheus, Grafana | ~2 hs |
-| [Testar es diseñar, no verificar](./testing-filosofia/) | Vitest, Testcontainers, Playwright | ~3 hs |
+| Unidad                                                                   | Qué aprendes                            | Tiempo |
+| ------------------------------------------------------------------------ | --------------------------------------- | ------ |
+| [SDD: cómo Rush decide antes de codear](./sdd-flujo/)                    | pipeline SDD, humano dirige, IA ejecuta | ~2 hs  |
+| [Claude Code y Engram como herramientas](./ai-tooling/)                  | Claude en terminal, Engram como memoria | ~2 hs  |
+| [Observabilidad: ver qué pasa en producción](./observabilidad-concepto/) | logs Pino, métricas Prometheus, Grafana | ~2 hs  |
+| [Testar es diseñar, no verificar](./testing-filosofia/)                  | Vitest, Testcontainers, Playwright      | ~3 hs  |
 
 **Total**: ~28 hs de lab + ~12 hs de lectura = ~40 hs
 
